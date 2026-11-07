@@ -1,48 +1,79 @@
 use anyhow::{ensure, Result};
+use std::collections::HashSet;
 
-use super::{block::Block, state::LedgerState};
+use super::{
+    block::Block,
+    chain::Chain,
+    consensus::{expected_difficulty_bits, ConsensusParams},
+    state::LedgerState,
+};
 
-fn meets_target(hash: &[u8; 32], difficulty_bits: u32) -> bool {
-    if difficulty_bits > 256 {
+fn meets_target(hash: &[u8; 32], difficulty_bits: u16) -> bool {
+    let bits = difficulty_bits as usize;
+
+    if bits > 255 {
         return false;
     }
 
-    let full_bytes = (difficulty_bits / 8) as usize;
-    let remaining_bits = difficulty_bits % 8;
+    let full_bytes = bits / 8;
+    let remaining_bits = bits % 8;
 
-    if hash[..full_bytes].iter().any(|&byte| byte != 0) {
+    if hash[..full_bytes].iter().any(|byte| *byte != 0) {
         return false;
     }
 
-    if remaining_bits == 0 {
-        return true;
-    }
+    remaining_bits == 0 || hash[full_bytes] >> (8 - remaining_bits) == 0
+}
 
-    hash[full_bytes] >> (8 - remaining_bits) == 0
+fn median_timestamp(chain: &Chain) -> u64 {
+    let mut timestamps: Vec<u64> = chain
+        .blocks
+        .iter()
+        .rev()
+        .take(11)
+        .map(|block| block.timestamp)
+        .collect();
+
+    timestamps.sort_unstable();
+
+    timestamps[timestamps.len() / 2]
 }
 
 pub fn validate_block(
     block: &Block,
-    expected_height: u64,
-    expected_previous_hash: [u8; 32],
-    expected_reward_coin_number: u64,
+    chain: &Chain,
     expected_reward_coin_id: [u8; 32],
-    max_supply: u64,
+    params: &ConsensusParams,
+    current_time: u64,
 ) -> Result<()> {
-    ensure!(block.height == expected_height, "incorrect block height");
+    params.validate()?;
+
+    let expected_height = chain.height() + 1;
 
     ensure!(
-        block.previous_hash == expected_previous_hash,
-        "incorrect previous block hash"
+        block.version == params.protocol_version,
+        "unsupported protocol version"
     );
 
     ensure!(
-        block.reward_coin_number == expected_reward_coin_number,
+        block.height == expected_height,
+        "incorrect block height"
+    );
+
+    ensure!(
+        block.previous_hash == chain.tip_hash(),
+        "incorrect previous block hash"
+    );
+
+    let expected_coin_number = chain.state.issued_coin_count + 1;
+
+    ensure!(
+        block.reward_coin_number == expected_coin_number,
         "reward is not the next sequential coin"
     );
 
     ensure!(
-        block.reward_coin_number <= max_supply,
+        block.reward_coin_number <= params.max_supply,
         "maximum supply exceeded"
     );
 
@@ -52,16 +83,48 @@ pub fn validate_block(
     );
 
     ensure!(
+        !chain.state.issued_coin_ids.contains(&block.reward_coin_id),
+        "reward coin has already been issued"
+    );
+
+    ensure!(
+        block.timestamp <= current_time.saturating_add(params.max_future_drift_secs),
+        "block timestamp is too far in the future"
+    );
+
+    if !chain.blocks.is_empty() {
+        ensure!(
+            block.timestamp > median_timestamp(chain),
+            "block timestamp is not greater than median time"
+        );
+    }
+
+    let expected_bits =
+        expected_difficulty_bits(chain, block.height, params)?;
+
+    ensure!(
+        block.difficulty_bits == expected_bits,
+        "incorrect network difficulty"
+    );
+
+    ensure!(
+        meets_target(&block.hash(), expected_bits),
+        "proof of work does not meet network difficulty"
+    );
+
+    ensure!(
         block.transaction_root == block.calculate_transaction_root(),
         "transaction Merkle root mismatch"
     );
 
-    ensure!(
-        meets_target(&block.hash(), block.difficulty_bits.into()),
-        "block proof of work does not meet difficulty"
-    );
+    let mut transaction_ids = HashSet::new();
 
     for tx in &block.transactions {
+        ensure!(
+            transaction_ids.insert(tx.id()),
+            "duplicate transaction in block"
+        );
+
         tx.verify_signature()?;
     }
 
