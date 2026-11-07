@@ -15,8 +15,13 @@ pub struct LedgerState {
 impl LedgerState {
     pub fn apply_transaction(&mut self, tx: &Transaction) -> Result<()> {
         tx.verify_signature()?;
+
         let expected_nonce = *self.next_nonce.get(&tx.sender).unwrap_or(&0);
-        ensure!(tx.nonce == expected_nonce, "incorrect transaction nonce");
+
+        ensure!(
+            tx.nonce == expected_nonce,
+            "incorrect transaction nonce"
+        );
 
         let total: u64 = tx.outputs.iter().try_fold(0u64, |sum, output| {
             sum.checked_add(output.amount)
@@ -24,18 +29,27 @@ impl LedgerState {
         })?;
 
         let balance = *self.balances.get(&tx.sender).unwrap_or(&0);
+
         ensure!(balance >= total, "insufficient balance");
 
+        let next_nonce = expected_nonce
+            .checked_add(1)
+            .ok_or_else(|| anyhow::anyhow!("transaction nonce overflow"))?;
+
         self.balances.insert(tx.sender, balance - total);
+
         for output in &tx.outputs {
             let current = *self.balances.get(&output.recipient).unwrap_or(&0);
+
             let updated = current
-    .checked_add(output.amount)
-    .ok_or_else(|| anyhow::anyhow!("recipient balance overflow"))?;
+                .checked_add(output.amount)
                 .ok_or_else(|| anyhow::anyhow!("recipient balance overflow"))?;
+
             self.balances.insert(output.recipient, updated);
         }
-        self.next_nonce.insert(tx.sender, expected_nonce + 1);
+
+        self.next_nonce.insert(tx.sender, next_nonce);
+
         Ok(())
     }
 
@@ -45,19 +59,31 @@ impl LedgerState {
         coin_id: [u8; 32],
         miner: [u8; 32],
     ) -> Result<()> {
+        let expected_number = self
+            .issued_coin_count
+            .checked_add(1)
+            .ok_or_else(|| anyhow::anyhow!("coin count overflow"))?;
+
         ensure!(
-            coin_number == self.issued_coin_count + 1,
+            coin_number == expected_number,
             "reward coin must be the next sequential number"
         );
-        ensure!(!self.issued_coin_ids.contains(&coin_id), "coin already issued");
+
+        ensure!(
+            !self.issued_coin_ids.contains(&coin_id),
+            "coin already issued"
+        );
 
         let current = *self.balances.get(&miner).unwrap_or(&0);
-        let updated = current.checked_add(1)
+
+        let updated = current
+            .checked_add(1)
             .ok_or_else(|| anyhow::anyhow!("miner balance overflow"))?;
 
         self.balances.insert(miner, updated);
         self.issued_coin_ids.insert(coin_id);
         self.issued_coin_count = coin_number;
+
         Ok(())
     }
-}
+            }
