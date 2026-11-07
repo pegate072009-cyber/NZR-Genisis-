@@ -1,6 +1,5 @@
 use nezora_supply::coin::{
-    generate_records, generate_records_seeded, validate_records,
-    validate_records_seeded,
+    generate_records, generate_records_seeded, validate_records, validate_records_seeded,
 };
 
 #[test]
@@ -31,11 +30,8 @@ fn different_seeds_produce_different_identifiers() {
     let seed_a = [7u8; 32];
     let seed_b = [9u8; 32];
 
-    let records_a =
-        generate_records_seeded(&seed_a, 1, 100).expect("generate with seed A");
-
-    let records_b =
-        generate_records_seeded(&seed_b, 1, 100).expect("generate with seed B");
+    let records_a = generate_records_seeded(&seed_a, 1, 100).expect("generate with seed A");
+    let records_b = generate_records_seeded(&seed_b, 1, 100).expect("generate with seed B");
 
     assert_ne!(records_a, records_b);
 }
@@ -45,12 +41,9 @@ fn rejects_incorrect_seed() {
     let correct_seed = [7u8; 32];
     let incorrect_seed = [9u8; 32];
 
-    let records =
-        generate_records_seeded(&correct_seed, 1, 100).expect("generate records");
+    let records = generate_records_seeded(&correct_seed, 1, 100).expect("generate records");
 
-    assert!(
-        validate_records_seeded(&records, &incorrect_seed, 1, 100).is_err()
-    );
+    assert!(validate_records_seeded(&records, &incorrect_seed, 1, 100).is_err());
 }
 
 #[test]
@@ -63,7 +56,5 @@ fn rejects_duplicate_or_modified_records() {
     lines.push_str(&first_line);
     lines.push('\n');
 
-    assert!(
-        validate_records_seeded(lines.as_bytes(), &seed, 1, 2).is_err()
-    );
+    assert!(validate_records_seeded(lines.as_bytes(), &seed, 1, 2).is_err());
 }
