@@ -1,0 +1,11 @@
+network = "Nezora"
+ticker = "NZR"
+maximum_supply = 30000000
+genesis_file_count = 30
+coins_per_file = 1000000
+coin_identifier_hash = "SHA-256"
+file_encryption = "AES-256-GCM"
+manifest_signature = "Ed25519"
+
+# This file is an example configuration only.
+# The current CLI uses command-line arguments; it does not load this file yet.
