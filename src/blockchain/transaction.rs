@@ -67,10 +67,7 @@ impl Transaction {
             signature: Vec::new(),
         };
 
-        tx.signature = signing_key
-            .sign(&tx.signing_bytes())
-            .to_bytes()
-            .to_vec();
+        tx.signature = signing_key.sign(&tx.signing_bytes()).to_bytes().to_vec();
 
         Ok(tx)
     }
