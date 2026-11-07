@@ -30,11 +30,7 @@ pub fn generate_records(first: u64, count: u32) -> Result<Vec<u8>> {
     Ok(output.into_bytes())
 }
 
-pub fn validate_records(
-    bytes: &[u8],
-    expected_first: u64,
-    expected_count: u32,
-) -> Result<()> {
+pub fn validate_records(bytes: &[u8], expected_first: u64, expected_count: u32) -> Result<()> {
     let text = std::str::from_utf8(bytes)?;
     let mut seen = HashSet::new();
     let mut count = 0u32;
@@ -63,10 +59,7 @@ pub fn validate_records(
             "invalid coin identifier"
         );
 
-        ensure!(
-            seen.insert(id.to_owned()),
-            "duplicate coin identifier"
-        );
+        ensure!(seen.insert(id.to_owned()), "duplicate coin identifier");
 
         ensure!(
             id == create_coin_record(number),
@@ -76,10 +69,7 @@ pub fn validate_records(
         count += 1;
     }
 
-    ensure!(
-        count == expected_count,
-        "incorrect number of coin records"
-    );
+    ensure!(count == expected_count, "incorrect number of coin records");
 
     Ok(())
 }
