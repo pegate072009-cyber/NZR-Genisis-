@@ -13,8 +13,7 @@ pub fn sha256_hex(data: &[u8]) -> String {
 }
 
 pub fn read_key(path: &Path) -> Result<[u8; 32]> {
-    let bytes =
-        fs::read(path).with_context(|| format!("reading key {}", path.display()))?;
+    let bytes = fs::read(path).with_context(|| format!("reading key {}", path.display()))?;
 
     ensure!(
         bytes.len() == 32,
