@@ -29,7 +29,9 @@ impl LedgerState {
         self.balances.insert(tx.sender, balance - total);
         for output in &tx.outputs {
             let current = *self.balances.get(&output.recipient).unwrap_or(&0);
-            let updated = current.checked_add(output.amount)
+            let updated = current
+    .checked_add(output.amount)
+    .ok_or_else(|| anyhow::anyhow!("recipient balance overflow"))?;
                 .ok_or_else(|| anyhow::anyhow!("recipient balance overflow"))?;
             self.balances.insert(output.recipient, updated);
         }
