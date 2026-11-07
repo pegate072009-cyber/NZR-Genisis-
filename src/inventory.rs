@@ -22,12 +22,7 @@ fn domain_parameters(supply: u64) -> Result<(u32, u64)> {
     Ok((half_bits, half_mask))
 }
 
-fn round_function(
-    seed: &[u8; 32],
-    round: u8,
-    value: u64,
-    mask: u64,
-) -> u64 {
+fn round_function(seed: &[u8; 32], round: u8, value: u64, mask: u64) -> u64 {
     let mut hasher = Sha256::new();
 
     hasher.update(b"NEZORA-INVENTORY-PRP-V1");
@@ -37,26 +32,16 @@ fn round_function(
 
     let digest = hasher.finalize();
 
-    u64::from_be_bytes(
-        digest[..8]
-            .try_into()
-            .expect("SHA-256 digest"),
-    ) & mask
+    u64::from_be_bytes(digest[..8].try_into().expect("SHA-256 digest")) & mask
 }
 
-fn permute_domain(
-    seed: &[u8; 32],
-    value: u64,
-    half_bits: u32,
-    half_mask: u64,
-) -> u64 {
+fn permute_domain(seed: &[u8; 32], value: u64, half_bits: u32, half_mask: u64) -> u64 {
     let mut left = (value >> half_bits) & half_mask;
     let mut right = value & half_mask;
 
     for round in 0..ROUNDS {
         let next_left = right;
-        let next_right =
-            left ^ round_function(seed, round, right, half_mask);
+        let next_right = left ^ round_function(seed, round, right, half_mask);
 
         left = next_left;
         right = next_right;
@@ -65,30 +50,16 @@ fn permute_domain(
     (left << half_bits) | right
 }
 
-pub fn slot_for_coin(
-    seed: &[u8; 32],
-    coin_number: u64,
-    supply: u64,
-) -> Result<u64> {
+pub fn slot_for_coin(seed: &[u8; 32], coin_number: u64, supply: u64) -> Result<u64> {
     ensure!(coin_number > 0, "coin number must be positive");
     ensure!(coin_number <= supply, "coin number exceeds supply");
 
     let (half_bits, half_mask) = domain_parameters(supply)?;
 
-    let mut position = permute_domain(
-        seed,
-        coin_number - 1,
-        half_bits,
-        half_mask,
-    );
+    let mut position = permute_domain(seed, coin_number - 1, half_bits, half_mask);
 
     while position >= supply {
-        position = permute_domain(
-            seed,
-            position,
-            half_bits,
-            half_mask,
-        );
+        position = permute_domain(seed, position, half_bits, half_mask);
     }
 
     Ok(position)
@@ -149,8 +120,7 @@ mod tests {
         let seed = [7u8; 32];
         let supply = 100_000;
 
-        let positions =
-            slots_for_range(&seed, 1, supply as u32, supply).unwrap();
+        let positions = slots_for_range(&seed, 1, supply as u32, supply).unwrap();
 
         let unique: HashSet<u64> = positions.iter().copied().collect();
 
