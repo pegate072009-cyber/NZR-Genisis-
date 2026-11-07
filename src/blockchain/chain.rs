@@ -29,13 +29,7 @@ impl Chain {
         params: &ConsensusParams,
         current_time: u64,
     ) -> Result<()> {
-        validate_block(
-            &block,
-            self,
-            expected_reward_coin_id,
-            params,
-            current_time,
-        )?;
+        validate_block(&block, self, expected_reward_coin_id, params, current_time)?;
 
         let mut candidate_state = self.state.clone();
 
