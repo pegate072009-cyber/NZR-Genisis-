@@ -221,7 +221,7 @@ pub fn verify_supply(
         "manifest total does not match file totals"
     );
 
-    println!("VALID: {total} {TICKER} inventory records.");
+        println!("VALID: {total} {TICKER} inventory records.");
 
     Ok(())
-                        }
+}
