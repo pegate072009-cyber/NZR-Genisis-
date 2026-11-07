@@ -106,4 +106,4 @@ mod tests {
         assert!(slot_for_coin(&seed, 101, 100).is_err());
         assert!(slot_for_coin(&seed, 1, 0).is_err());
     }
-}
+                              }
