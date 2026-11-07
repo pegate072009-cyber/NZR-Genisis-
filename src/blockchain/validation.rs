@@ -1,7 +1,23 @@
 use anyhow::{ensure, Result};
 
-use crate::mining::difficulty::meets_target;
+fn meets_target(hash: &[u8; 32], difficulty_bits: u32) -> bool {
+    if difficulty_bits > 256 {
+        return false;
+    }
 
+    let full_bytes = (difficulty_bits / 8) as usize;
+    let remaining_bits = difficulty_bits % 8;
+
+    if hash[..full_bytes].iter().any(|&byte| byte != 0) {
+        return false;
+    }
+
+    if remaining_bits == 0 {
+        return true;
+    }
+
+    hash[full_bytes] >> (8 - remaining_bits) == 0
+}
 use super::{block::Block, state::LedgerState};
 
 pub fn validate_block(
