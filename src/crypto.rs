@@ -1,4 +1,3 @@
-
 use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
@@ -14,8 +13,8 @@ pub fn sha256_hex(data: &[u8]) -> String {
 }
 
 pub fn read_key(path: &Path) -> Result<[u8; 32]> {
-    let bytes = fs::read(path)
-        .with_context(|| format!("reading key {}", path.display()))?;
+    let bytes =
+        fs::read(path).with_context(|| format!("reading key {}", path.display()))?;
 
     ensure!(
         bytes.len() == 32,
@@ -41,15 +40,11 @@ pub fn encrypt(key: &[u8; 32], plaintext: &[u8]) -> Result<Vec<u8>> {
 
     let mut output = nonce_bytes.to_vec();
     output.extend_from_slice(&ciphertext);
-
     Ok(output)
 }
 
 pub fn decrypt(key: &[u8; 32], input: &[u8]) -> Result<Vec<u8>> {
-    ensure!(
-        input.len() >= 12 + 16,
-        "Encrypted file is too short"
-    );
+    ensure!(input.len() >= 12 + 16, "Encrypted file is too short");
 
     let cipher = Aes256Gcm::new_from_slice(key)
         .map_err(|_| anyhow!("Invalid AES-256 decryption key"))?;
