@@ -1,5 +1,5 @@
 use crate::{
-    coin::{generate_records, validate_records},
+    coin::{generate_records_seeded, validate_records_seeded},
     crypto::{decrypt, encrypt, read_key, sha256_hex, sign_bytes, verify_signature},
     manifest::{FileEntry, Manifest},
     MAX_SUPPLY, NETWORK_NAME, TICKER,
@@ -38,22 +38,29 @@ pub fn generate_supply(
 
     for index in 1..=files {
         let filename = format!("block.{index:02}.enc");
-        let plaintext = generate_records(first, coins_per_file)?;
+
+        let plaintext = generate_records_seeded(&seed, first, coins_per_file)?;
         let encrypted = encrypt(&encryption_key, &plaintext)?;
 
         fs::write(output_dir.join(&filename), &encrypted)
             .with_context(|| format!("writing {filename}"))?;
 
+        let last = first
+            .checked_add(coins_per_file as u64 - 1)
+            .ok_or_else(|| anyhow::anyhow!("coin number overflow"))?;
+
         entries.push(FileEntry {
             file: filename,
             first_coin_number: first,
-            last_coin_number: first + coins_per_file as u64 - 1,
+            last_coin_number: last,
             coin_records: coins_per_file,
             encrypted_sha256: sha256_hex(&encrypted),
             encryption: "AES-256-GCM".into(),
         });
 
-        first += coins_per_file as u64;
+        first = last
+            .checked_add(1)
+            .ok_or_else(|| anyhow::anyhow!("coin number overflow"))?;
     }
 
     let manifest = Manifest {
@@ -105,13 +112,10 @@ pub fn verify_supply(
         "invalid inventory seed"
     );
 
-    ensure!(
-        manifest
-            .inventory_seed
-            .bytes()
-            .all(|b| b.is_ascii_hexdigit()),
-        "inventory seed must be hexadecimal"
-    );
+    let seed_bytes = hex::decode(&manifest.inventory_seed)?;
+    let seed: [u8; 32] = seed_bytes
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("inventory seed must be exactly 32 bytes"))?;
 
     let decrypt_key = encryption_key_path.map(read_key).transpose()?;
     let mut total = 0u64;
@@ -123,8 +127,15 @@ pub fn verify_supply(
             "inventory sequence gap or overlap"
         );
 
+        ensure!(entry.coin_records > 0, "empty inventory file");
+
+        let expected_last = entry
+            .first_coin_number
+            .checked_add(entry.coin_records as u64 - 1)
+            .ok_or_else(|| anyhow::anyhow!("coin number overflow"))?;
+
         ensure!(
-            entry.last_coin_number == entry.first_coin_number + entry.coin_records as u64 - 1,
+            entry.last_coin_number == expected_last,
             "incorrect inventory file range"
         );
 
@@ -141,11 +152,22 @@ pub fn verify_supply(
             let plaintext =
                 decrypt(key, &bytes).with_context(|| format!("decrypting {}", entry.file))?;
 
-            validate_records(&plaintext, entry.first_coin_number, entry.coin_records)?;
+            validate_records_seeded(
+                &plaintext,
+                &seed,
+                entry.first_coin_number,
+                entry.coin_records,
+            )?;
         }
 
-        total += entry.coin_records as u64;
-        expected_first = entry.last_coin_number + 1;
+        total = total
+            .checked_add(entry.coin_records as u64)
+            .ok_or_else(|| anyhow::anyhow!("inventory total overflow"))?;
+
+        expected_first = entry
+            .last_coin_number
+            .checked_add(1)
+            .ok_or_else(|| anyhow::anyhow!("coin number overflow"))?;
     }
 
     ensure!(
