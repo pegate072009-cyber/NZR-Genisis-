@@ -35,7 +35,6 @@ fn median_timestamp(chain: &Chain) -> u64 {
         .collect();
 
     timestamps.sort_unstable();
-
     timestamps[timestamps.len() / 2]
 }
 
@@ -55,10 +54,7 @@ pub fn validate_block(
         "unsupported protocol version"
     );
 
-    ensure!(
-        block.height == expected_height,
-        "incorrect block height"
-    );
+    ensure!(block.height == expected_height, "incorrect block height");
 
     ensure!(
         block.previous_hash == chain.tip_hash(),
@@ -99,8 +95,7 @@ pub fn validate_block(
         );
     }
 
-    let expected_bits =
-        expected_difficulty_bits(chain, block.height, params)?;
+    let expected_bits = expected_difficulty_bits(chain, block.height, params)?;
 
     ensure!(
         block.difficulty_bits == expected_bits,
@@ -131,10 +126,7 @@ pub fn validate_block(
     Ok(())
 }
 
-pub fn apply_block_transactions(
-    block: &Block,
-    state: &mut LedgerState,
-) -> Result<()> {
+pub fn apply_block_transactions(block: &Block, state: &mut LedgerState) -> Result<()> {
     let mut candidate = state.clone();
 
     for tx in &block.transactions {
@@ -148,6 +140,5 @@ pub fn apply_block_transactions(
     )?;
 
     *state = candidate;
-
     Ok(())
 }
