@@ -44,7 +44,6 @@ impl Transaction {
 
         let digest = Sha256::digest(bytes);
         let mut id = [0u8; 32];
-
         id.copy_from_slice(&digest);
         id
     }
@@ -55,10 +54,7 @@ impl Transaction {
         outputs: Vec<TxOutput>,
         signing_key: &SigningKey,
     ) -> Result<Self> {
-        ensure!(
-            !outputs.is_empty(),
-            "transaction needs at least one output"
-        );
+        ensure!(!outputs.is_empty(), "transaction needs at least one output");
 
         let public_key = signing_key.verifying_key().to_bytes();
 
@@ -85,10 +81,7 @@ impl Transaction {
             "sender does not match public key"
         );
 
-        ensure!(
-            !self.outputs.is_empty(),
-            "transaction has no outputs"
-        );
+        ensure!(!self.outputs.is_empty(), "transaction has no outputs");
 
         let key = VerifyingKey::from_bytes(&self.public_key)?;
         let signature = Signature::from_slice(&self.signature)?;
