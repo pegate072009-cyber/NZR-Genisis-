@@ -3,8 +3,7 @@ use sha2::{Digest, Sha256};
 
 const HALF_BITS: u32 = 13;
 const HALF_MASK: u64 = (1 << HALF_BITS) - 1;
-const DOMAIN_BITS: u32 = HALF_BITS * 2;
-const DOMAIN_SIZE: u64 = 1 << DOMAIN_BITS;
+const DOMAIN_SIZE: u64 = 1 << 26;
 const ROUNDS: u8 = 6;
 
 fn round_function(seed: &[u8; 32], round: u8, value: u64) -> u64 {
@@ -61,6 +60,7 @@ pub fn slot_for_coin(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     #[test]
     fn mapping_is_deterministic() {
@@ -88,7 +88,7 @@ mod tests {
         let seed = [7u8; 32];
         let supply = 100_000;
 
-        let mut positions = std::collections::HashSet::new();
+        let mut positions = HashSet::new();
 
         for number in 1..=supply {
             let position = slot_for_coin(&seed, number, supply).unwrap();
