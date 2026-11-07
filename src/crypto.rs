@@ -28,8 +28,8 @@ pub fn read_key(path: &Path) -> Result<[u8; 32]> {
 }
 
 pub fn encrypt(key: &[u8; 32], plaintext: &[u8]) -> Result<Vec<u8>> {
-    let cipher = Aes256Gcm::new_from_slice(key)
-        .map_err(|_| anyhow!("Invalid AES-256 encryption key"))?;
+    let cipher =
+        Aes256Gcm::new_from_slice(key).map_err(|_| anyhow!("Invalid AES-256 encryption key"))?;
 
     let mut nonce_bytes = [0u8; 12];
     OsRng.fill_bytes(&mut nonce_bytes);
@@ -46,8 +46,8 @@ pub fn encrypt(key: &[u8; 32], plaintext: &[u8]) -> Result<Vec<u8>> {
 pub fn decrypt(key: &[u8; 32], input: &[u8]) -> Result<Vec<u8>> {
     ensure!(input.len() >= 12 + 16, "Encrypted file is too short");
 
-    let cipher = Aes256Gcm::new_from_slice(key)
-        .map_err(|_| anyhow!("Invalid AES-256 decryption key"))?;
+    let cipher =
+        Aes256Gcm::new_from_slice(key).map_err(|_| anyhow!("Invalid AES-256 decryption key"))?;
 
     let (nonce, ciphertext) = input.split_at(12);
 
@@ -62,11 +62,7 @@ pub fn sign_bytes(signing_key: &SigningKey, data: &[u8]) -> Vec<u8> {
     signing_key.sign(data).to_bytes().to_vec()
 }
 
-pub fn verify_signature(
-    public_key: &[u8; 32],
-    data: &[u8],
-    signature: &[u8],
-) -> Result<()> {
+pub fn verify_signature(public_key: &[u8; 32], data: &[u8], signature: &[u8]) -> Result<()> {
     let key = VerifyingKey::from_bytes(public_key)?;
     let sig = Signature::from_slice(signature)?;
 
