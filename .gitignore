@@ -1,0 +1,9 @@
+/target/
+/private/
+/public/
+/genesis/
+/test-genesis/
+*.key
+*.secret
+.env
+.env.*
