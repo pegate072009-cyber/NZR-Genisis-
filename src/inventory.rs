@@ -38,11 +38,7 @@ fn permute_domain(seed: &[u8; 32], value: u64) -> u64 {
     (left << HALF_BITS) | right
 }
 
-pub fn slot_for_coin(
-    seed: &[u8; 32],
-    coin_number: u64,
-    supply: u64,
-) -> Result<u64> {
+pub fn slot_for_coin(seed: &[u8; 32], coin_number: u64, supply: u64) -> Result<u64> {
     ensure!(supply > 0, "supply must be positive");
     ensure!(supply <= DOMAIN_SIZE, "supply exceeds permutation domain");
     ensure!(coin_number > 0, "coin number must be positive");
@@ -106,4 +102,4 @@ mod tests {
         assert!(slot_for_coin(&seed, 101, 100).is_err());
         assert!(slot_for_coin(&seed, 1, 0).is_err());
     }
-                              }
+}
