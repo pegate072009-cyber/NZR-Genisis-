@@ -1,9 +1,9 @@
 pub mod blockchain;
 pub mod coin;
 pub mod crypto;
+pub mod inventory;
 pub mod manifest;
 pub mod storage;
-pub mod inventory;
 
 pub const NETWORK_NAME: &str = "Nezora";
 pub const TICKER: &str = "NZR";
