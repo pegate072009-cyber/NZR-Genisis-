@@ -8,7 +8,11 @@ use crate::{
 use anyhow::{ensure, Context, Result};
 use ed25519_dalek::SigningKey;
 use rand::{rngs::OsRng, RngCore};
-use std::{fs, path::Path};
+use std::{
+    fs::{self, File},
+    io::{BufWriter, Write},
+    path::Path,
+};
 
 pub fn generate_supply(
     output_dir: &Path,
@@ -17,13 +21,14 @@ pub fn generate_supply(
     encryption_key_path: &Path,
     signing_key_path: &Path,
 ) -> Result<()> {
-    ensure!(files > 0 && coins_per_file > 0, "invalid inventory size");
+    ensure!(files > 0, "file count must be positive");
+    ensure!(coins_per_file > 0, "file capacity must be positive");
 
     let total = (files as u64)
         .checked_mul(coins_per_file as u64)
         .ok_or_else(|| anyhow::anyhow!("supply calculation overflow"))?;
 
-    ensure!(total <= MAX_SUPPLY, "maximum supply exceeded");
+    ensure!(total == MAX_SUPPLY, "inventory must cover maximum supply");
 
     let encryption_key = read_key(encryption_key_path)?;
     let signing_bytes = read_key(signing_key_path)?;
@@ -34,38 +39,82 @@ pub fn generate_supply(
 
     fs::create_dir_all(output_dir)?;
 
-    let mut entries = Vec::with_capacity(files as usize);
+    let mut random_name = [0u8; 16];
+    OsRng.fill_bytes(&mut random_name);
 
-    for index in 0..files {
-        let first_slot = index as u64 * coins_per_file as u64;
-        let last_slot = first_slot + coins_per_file as u64 - 1;
+    let temp_dir = output_dir.join(format!(
+        ".nezora-temp-{}",
+        hex::encode(random_name)
+    ));
 
-        let mut records = String::new();
+    fs::create_dir(&temp_dir)?;
 
-        for coin_number in 1..=total {
-            let slot = slot_for_coin(&seed, coin_number, MAX_SUPPLY)?;
+    let generation_result = (|| -> Result<Vec<FileEntry>> {
+        let mut writers = Vec::with_capacity(files as usize);
 
-            if (first_slot..=last_slot).contains(&slot) {
-                let id = create_coin_record_with_seed(&seed, coin_number);
-                records.push_str(&format!("{coin_number} {id}\n"));
-            }
+        for index in 0..files {
+            let path = temp_dir.join(format!("inventory.{index:02}.tmp"));
+            let file = File::create(path)?;
+            writers.push(BufWriter::new(file));
         }
 
-        let filename = format!("block.{:02}.enc", index + 1);
-        let encrypted = encrypt(&encryption_key, records.as_bytes())?;
+        for coin_number in 1..=MAX_SUPPLY {
+            let slot = slot_for_coin(&seed, coin_number, MAX_SUPPLY)?;
 
-        fs::write(output_dir.join(&filename), &encrypted)
-            .with_context(|| format!("writing {filename}"))?;
+            let file_index = slot / coins_per_file as u64;
 
-        entries.push(FileEntry {
-            file: filename,
-            first_slot,
-            last_slot,
-            coin_records: coins_per_file,
-            encrypted_sha256: sha256_hex(&encrypted),
-            encryption: "AES-256-GCM".into(),
-        });
-    }
+            ensure!(
+                file_index < files as u64,
+                "calculated inventory file is out of range"
+            );
+
+            let id = create_coin_record_with_seed(&seed, coin_number);
+
+            writeln!(
+                writers[file_index as usize],
+                "{coin_number} {id}"
+            )?;
+        }
+
+        for writer in &mut writers {
+            writer.flush()?;
+        }
+
+        drop(writers);
+
+        let mut entries = Vec::with_capacity(files as usize);
+
+        for index in 0..files {
+            let first_slot = index as u64 * coins_per_file as u64;
+            let last_slot = first_slot + coins_per_file as u64 - 1;
+
+            let temp_path = temp_dir.join(format!("inventory.{index:02}.tmp"));
+            let plaintext = fs::read(&temp_path)?;
+
+            let encrypted = encrypt(&encryption_key, &plaintext)?;
+
+            let filename = format!("block.{:02}.enc", index + 1);
+
+            fs::write(output_dir.join(&filename), &encrypted)
+                .with_context(|| format!("writing {filename}"))?;
+
+            entries.push(FileEntry {
+                file: filename,
+                first_slot,
+                last_slot,
+                coin_records: coins_per_file,
+                encrypted_sha256: sha256_hex(&encrypted),
+                encryption: "AES-256-GCM".into(),
+            });
+        }
+
+        Ok(entries)
+    })();
+
+    let cleanup_result = fs::remove_dir_all(&temp_dir);
+
+    let entries = generation_result?;
+    cleanup_result?;
 
     let manifest = Manifest {
         network: NETWORK_NAME.into(),
@@ -94,6 +143,7 @@ pub fn verify_supply(
     encryption_key_path: Option<&Path>,
 ) -> Result<()> {
     let manifest_bytes = fs::read(input_dir.join("manifest.json"))?;
+
     let signature_hex = fs::read_to_string(input_dir.join("manifest.sig"))?;
     let signature = hex::decode(signature_hex.trim())?;
     let public_key = read_key(public_key_path)?;
@@ -118,11 +168,19 @@ pub fn verify_supply(
     );
 
     ensure!(
-        manifest.total_coin_records <= MAX_SUPPLY,
-        "manifest exceeds maximum supply"
+        manifest.total_coin_records == MAX_SUPPLY,
+        "incomplete inventory"
+    );
+
+    ensure!(
+        manifest.files.len() as u64
+            * manifest.files.first().map_or(0, |entry| entry.coin_records as u64)
+            == MAX_SUPPLY,
+        "incorrect inventory file configuration"
     );
 
     let seed_bytes = hex::decode(&manifest.inventory_seed)?;
+
     let seed: [u8; 32] = seed_bytes
         .try_into()
         .map_err(|_| anyhow::anyhow!("inventory seed must be exactly 32 bytes"))?;
@@ -138,14 +196,20 @@ pub fn verify_supply(
             "slot sequence gap or overlap"
         );
 
-        ensure!(entry.coin_records > 0, "empty inventory file");
+        ensure!(
+            entry.coin_records > 0,
+            "empty inventory file"
+        );
 
         let expected_last = entry
             .first_slot
             .checked_add(entry.coin_records as u64 - 1)
             .ok_or_else(|| anyhow::anyhow!("slot overflow"))?;
 
-        ensure!(entry.last_slot == expected_last, "incorrect slot range");
+        ensure!(
+            entry.last_slot == expected_last,
+            "incorrect slot range"
+        );
 
         let bytes = fs::read(input_dir.join(&entry.file))
             .with_context(|| format!("reading {}", entry.file))?;
@@ -157,11 +221,11 @@ pub fn verify_supply(
         );
 
         if let Some(ref key) = decrypt_key {
-            let plaintext =
-                decrypt(key, &bytes).with_context(|| format!("decrypting {}", entry.file))?;
+            let plaintext = decrypt(key, &bytes)
+                .with_context(|| format!("decrypting {}", entry.file))?;
 
             let text = std::str::from_utf8(&plaintext)?;
-            let mut count = 0u32;
+            let mut count = 0u64;
 
             for line in text.lines() {
                 let mut parts = line.split_whitespace();
@@ -175,11 +239,14 @@ pub fn verify_supply(
                     .next()
                     .ok_or_else(|| anyhow::anyhow!("missing coin identifier"))?;
 
-                ensure!(parts.next().is_none(), "unexpected extra field");
+                ensure!(
+                    parts.next().is_none(),
+                    "unexpected extra field"
+                );
 
                 ensure!(
-                    number > 0 && number <= manifest.total_coin_records,
-                    "coin number outside generated supply"
+                    (1..=MAX_SUPPLY).contains(&number),
+                    "invalid coin number"
                 );
 
                 ensure!(
@@ -191,24 +258,20 @@ pub fn verify_supply(
 
                 ensure!(
                     (entry.first_slot..=entry.last_slot).contains(&slot),
-                    "coin stored in incorrect slot range"
+                    "coin stored in incorrect file"
                 );
 
-                count = count
-                    .checked_add(1)
-                    .ok_or_else(|| anyhow::anyhow!("record count overflow"))?;
+                count += 1;
             }
 
             ensure!(
-                count == entry.coin_records,
+                count == entry.coin_records as u64,
                 "incorrect record count in {}",
                 entry.file
             );
         }
 
-        total = total
-            .checked_add(entry.coin_records as u64)
-            .ok_or_else(|| anyhow::anyhow!("inventory total overflow"))?;
+        total += entry.coin_records as u64;
 
         expected_slot = entry
             .last_slot
@@ -216,7 +279,12 @@ pub fn verify_supply(
             .ok_or_else(|| anyhow::anyhow!("slot overflow"))?;
     }
 
-        ensure!(
+    ensure!(
+        expected_slot == MAX_SUPPLY,
+        "inventory slot coverage is incomplete"
+    );
+
+    ensure!(
         total == manifest.total_coin_records,
         "manifest total does not match file totals"
     );
@@ -224,4 +292,4 @@ pub fn verify_supply(
     println!("VALID: {total} {TICKER} inventory records.");
 
     Ok(())
-}
+                    }
