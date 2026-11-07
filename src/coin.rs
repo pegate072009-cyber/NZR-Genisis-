@@ -20,11 +20,7 @@ pub fn generate_records(first: u64, count: u32) -> Result<Vec<u8>> {
     generate_records_seeded(&[0u8; 32], first, count)
 }
 
-pub fn generate_records_seeded(
-    seed: &[u8; 32],
-    first: u64,
-    count: u32,
-) -> Result<Vec<u8>> {
+pub fn generate_records_seeded(seed: &[u8; 32], first: u64, count: u32) -> Result<Vec<u8>> {
     ensure!(first > 0, "first coin number must be positive");
 
     let mut output = String::new();
@@ -48,11 +44,7 @@ pub fn generate_records_seeded(
     Ok(output.into_bytes())
 }
 
-pub fn validate_records(
-    bytes: &[u8],
-    expected_first: u64,
-    expected_count: u32,
-) -> Result<()> {
+pub fn validate_records(bytes: &[u8], expected_first: u64, expected_count: u32) -> Result<()> {
     validate_records_seeded(bytes, &[0u8; 32], expected_first, expected_count)
 }
 
@@ -86,10 +78,7 @@ pub fn validate_records_seeded(
             .checked_add(count as u64)
             .ok_or_else(|| anyhow::anyhow!("coin number overflow"))?;
 
-        ensure!(
-            number == expected_number,
-            "coin sequence mismatch"
-        );
+        ensure!(number == expected_number, "coin sequence mismatch");
 
         ensure!(
             id.len() == 64 && id.bytes().all(|b| b.is_ascii_hexdigit()),
