@@ -13,6 +13,8 @@ pub struct Manifest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileEntry {
     pub file: String,
+    pub first_coin_number: u64,
+    pub last_coin_number: u64,
     pub coin_records: u32,
     pub encrypted_sha256: String,
     pub encryption: String,
