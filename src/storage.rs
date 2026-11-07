@@ -145,10 +145,7 @@ pub fn verify_supply(
             .checked_add(entry.coin_records as u64 - 1)
             .ok_or_else(|| anyhow::anyhow!("slot overflow"))?;
 
-        ensure!(
-            entry.last_slot == expected_last,
-            "incorrect slot range"
-        );
+        ensure!(entry.last_slot == expected_last, "incorrect slot range");
 
         let bytes = fs::read(input_dir.join(&entry.file))
             .with_context(|| format!("reading {}", entry.file))?;
@@ -160,8 +157,8 @@ pub fn verify_supply(
         );
 
         if let Some(ref key) = decrypt_key {
-            let plaintext = decrypt(key, &bytes)
-                .with_context(|| format!("decrypting {}", entry.file))?;
+            let plaintext =
+                decrypt(key, &bytes).with_context(|| format!("decrypting {}", entry.file))?;
 
             let text = std::str::from_utf8(&plaintext)?;
             let mut count = 0u32;
@@ -227,4 +224,4 @@ pub fn verify_supply(
     println!("VALID: {total} {TICKER} inventory records.");
 
     Ok(())
-        }
+                        }
