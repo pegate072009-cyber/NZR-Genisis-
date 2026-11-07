@@ -100,7 +100,10 @@ pub fn verify_supply(
         "manifest exceeds maximum supply"
     );
 
-    ensure!(manifest.inventory_seed.len() == 64, "invalid inventory seed");
+    ensure!(
+        manifest.inventory_seed.len() == 64,
+        "invalid inventory seed"
+    );
 
     ensure!(
         manifest
