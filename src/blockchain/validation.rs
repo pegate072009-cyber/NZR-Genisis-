@@ -1,7 +1,6 @@
 use anyhow::{ensure, Result};
 
-fn meets_target(hash: &[u8; 32], difficulty_bits: u32) -> bool {
-    if difficulty_bits > 256 {
+fn meets_target(hash: &[u8; 32], difficulty_bits: u16) -> bool {
         return false;
     }
 
