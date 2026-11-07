@@ -42,10 +42,7 @@ pub fn generate_supply(
     let mut random_name = [0u8; 16];
     OsRng.fill_bytes(&mut random_name);
 
-    let temp_dir = output_dir.join(format!(
-        ".nezora-temp-{}",
-        hex::encode(random_name)
-    ));
+    let temp_dir = output_dir.join(format!(".nezora-temp-{}", hex::encode(random_name)));
 
     fs::create_dir(&temp_dir)?;
 
@@ -69,10 +66,7 @@ pub fn generate_supply(
 
             let id = create_coin_record_with_seed(&seed, coin_number);
 
-            writeln!(
-                writers[file_index as usize],
-                "{coin_number} {id}"
-            )?;
+            writeln!(writers[file_index as usize], "{coin_number} {id}")?;
         }
 
         for writer in &mut writers {
@@ -169,9 +163,16 @@ pub fn verify_supply(
     );
 
     ensure!(
-        manifest.files.len() as u64
-            * manifest.files.first().map_or(0, |entry| entry.coin_records as u64)
-            == MAX_SUPPLY,
+        !manifest.files.is_empty(),
+        "inventory contains no files"
+    );
+
+    let first_file_capacity = manifest.files[0].coin_records as u64;
+
+    ensure!(first_file_capacity > 0, "invalid file capacity");
+
+    ensure!(
+        manifest.files.len() as u64 * first_file_capacity == MAX_SUPPLY,
         "incorrect inventory file configuration"
     );
 
@@ -186,6 +187,11 @@ pub fn verify_supply(
     let mut expected_slot = 0u64;
 
     for entry in &manifest.files {
+        ensure!(
+            entry.coin_records as u64 == first_file_capacity,
+            "inconsistent file capacity"
+        );
+
         ensure!(
             entry.first_slot == expected_slot,
             "slot sequence gap or overlap"
@@ -215,6 +221,7 @@ pub fn verify_supply(
 
             let text = std::str::from_utf8(&plaintext)?;
             let mut count = 0u64;
+            let mut previous_number = 0u64;
 
             for line in text.lines() {
                 let mut parts = line.split_whitespace();
@@ -232,6 +239,11 @@ pub fn verify_supply(
                 ensure!((1..=MAX_SUPPLY).contains(&number), "invalid coin number");
 
                 ensure!(
+                    number > previous_number,
+                    "duplicate or unordered coin number"
+                );
+
+                ensure!(
                     id == create_coin_record_with_seed(&seed, number),
                     "invalid coin identifier"
                 );
@@ -243,6 +255,7 @@ pub fn verify_supply(
                     "coin stored in incorrect file"
                 );
 
+                previous_number = number;
                 count += 1;
             }
 
@@ -274,4 +287,4 @@ pub fn verify_supply(
     println!("VALID: {total} {TICKER} inventory records.");
 
     Ok(())
-        }
+    }
