@@ -216,12 +216,12 @@ pub fn verify_supply(
             .ok_or_else(|| anyhow::anyhow!("slot overflow"))?;
     }
 
-    ensure!(
+        ensure!(
         total == manifest.total_coin_records,
         "manifest total does not match file totals"
     );
 
-        println!("VALID: {total} {TICKER} inventory records.");
+    println!("VALID: {total} {TICKER} inventory records.");
 
     Ok(())
 }
