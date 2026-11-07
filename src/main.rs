@@ -15,13 +15,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Generate local encryption and signing keys.
     InitKeys {
         #[arg(long, default_value = "private")]
         dir: PathBuf,
     },
-
-    /// Generate encrypted coin inventory files and signed manifest.
     Generate {
         #[arg(long, default_value = "genesis")]
         out: PathBuf,
@@ -34,8 +31,6 @@ enum Command {
         #[arg(long, default_value = "private/signing.key")]
         signing_key: PathBuf,
     },
-
-    /// Verify manifest and file checksums.
     Verify {
         #[arg(long, default_value = "genesis")]
         dir: PathBuf,
@@ -57,10 +52,7 @@ fn init_keys(dir: &PathBuf) -> Result<()> {
 
     fs::write(dir.join("encryption.key"), encryption_key)?;
     fs::write(dir.join("signing.key"), signing_key.to_bytes())?;
-    fs::write(
-        "public/public.key",
-        signing_key.verifying_key().to_bytes(),
-    )?;
+    fs::write("public/public.key", signing_key.verifying_key().to_bytes())?;
 
     println!("Nezora keys created.");
     println!("Keep encryption.key and signing.key private and backed up.");
@@ -74,7 +66,6 @@ fn main() -> Result<()> {
 
     match cli.command {
         Command::InitKeys { dir } => init_keys(&dir)?,
-
         Command::Generate {
             out,
             files,
@@ -82,15 +73,8 @@ fn main() -> Result<()> {
             encryption_key,
             signing_key,
         } => {
-            generate_supply(
-                &out,
-                files,
-                coins_per_file,
-                &encryption_key,
-                &signing_key,
-            )?;
+            generate_supply(&out, files, coins_per_file, &encryption_key, &signing_key)?;
         }
-
         Command::Verify {
             dir,
             public_key,
