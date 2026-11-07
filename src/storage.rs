@@ -60,7 +60,6 @@ pub fn generate_supply(
 
         for coin_number in 1..=MAX_SUPPLY {
             let slot = slot_for_coin(&seed, coin_number, MAX_SUPPLY)?;
-
             let file_index = slot / coins_per_file as u64;
 
             ensure!(
@@ -90,7 +89,6 @@ pub fn generate_supply(
 
             let temp_path = temp_dir.join(format!("inventory.{index:02}.tmp"));
             let plaintext = fs::read(&temp_path)?;
-
             let encrypted = encrypt(&encryption_key, &plaintext)?;
 
             let filename = format!("block.{:02}.enc", index + 1);
@@ -112,7 +110,6 @@ pub fn generate_supply(
     })();
 
     let cleanup_result = fs::remove_dir_all(&temp_dir);
-
     let entries = generation_result?;
     cleanup_result?;
 
@@ -143,7 +140,6 @@ pub fn verify_supply(
     encryption_key_path: Option<&Path>,
 ) -> Result<()> {
     let manifest_bytes = fs::read(input_dir.join("manifest.json"))?;
-
     let signature_hex = fs::read_to_string(input_dir.join("manifest.sig"))?;
     let signature = hex::decode(signature_hex.trim())?;
     let public_key = read_key(public_key_path)?;
@@ -180,7 +176,6 @@ pub fn verify_supply(
     );
 
     let seed_bytes = hex::decode(&manifest.inventory_seed)?;
-
     let seed: [u8; 32] = seed_bytes
         .try_into()
         .map_err(|_| anyhow::anyhow!("inventory seed must be exactly 32 bytes"))?;
@@ -196,20 +191,14 @@ pub fn verify_supply(
             "slot sequence gap or overlap"
         );
 
-        ensure!(
-            entry.coin_records > 0,
-            "empty inventory file"
-        );
+        ensure!(entry.coin_records > 0, "empty inventory file");
 
         let expected_last = entry
             .first_slot
             .checked_add(entry.coin_records as u64 - 1)
             .ok_or_else(|| anyhow::anyhow!("slot overflow"))?;
 
-        ensure!(
-            entry.last_slot == expected_last,
-            "incorrect slot range"
-        );
+        ensure!(entry.last_slot == expected_last, "incorrect slot range");
 
         let bytes = fs::read(input_dir.join(&entry.file))
             .with_context(|| format!("reading {}", entry.file))?;
@@ -221,8 +210,8 @@ pub fn verify_supply(
         );
 
         if let Some(ref key) = decrypt_key {
-            let plaintext = decrypt(key, &bytes)
-                .with_context(|| format!("decrypting {}", entry.file))?;
+            let plaintext =
+                decrypt(key, &bytes).with_context(|| format!("decrypting {}", entry.file))?;
 
             let text = std::str::from_utf8(&plaintext)?;
             let mut count = 0u64;
@@ -239,15 +228,8 @@ pub fn verify_supply(
                     .next()
                     .ok_or_else(|| anyhow::anyhow!("missing coin identifier"))?;
 
-                ensure!(
-                    parts.next().is_none(),
-                    "unexpected extra field"
-                );
-
-                ensure!(
-                    (1..=MAX_SUPPLY).contains(&number),
-                    "invalid coin number"
-                );
+                ensure!(parts.next().is_none(), "unexpected extra field");
+                ensure!((1..=MAX_SUPPLY).contains(&number), "invalid coin number");
 
                 ensure!(
                     id == create_coin_record_with_seed(&seed, number),
@@ -292,4 +274,4 @@ pub fn verify_supply(
     println!("VALID: {total} {TICKER} inventory records.");
 
     Ok(())
-                    }
+        }
