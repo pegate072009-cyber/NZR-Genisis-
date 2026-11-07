@@ -14,17 +14,10 @@ impl Chain {
     }
 
     pub fn tip_hash(&self) -> [u8; 32] {
-        self.blocks
-            .last()
-            .map(Block::hash)
-            .unwrap_or([0u8; 32])
+        self.blocks.last().map(Block::hash).unwrap_or([0u8; 32])
     }
 
-    pub fn append_validated(
-        &mut self,
-        block: Block,
-        new_state: LedgerState,
-    ) -> Result<()> {
+    pub fn append_validated(&mut self, block: Block, new_state: LedgerState) -> Result<()> {
         ensure!(
             block.height == self.height() + 1,
             "block height is not contiguous"
