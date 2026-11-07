@@ -1,0 +1,15 @@
+[package]
+name = "nextsora-genesis"
+version = "0.1.0"
+edition = "2021"
+description = "Nextsora (NXS) experimental genesis coin-supply generator"
+
+[dependencies]
+aes-gcm = "0.10"
+clap = { version = "4", features = ["derive"] }
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+hex = "0.4"
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
