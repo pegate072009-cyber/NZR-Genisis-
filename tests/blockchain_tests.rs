@@ -22,8 +22,7 @@ fn transaction_signature_verifies() {
     )
     .expect("sign transaction");
 
-    tx.verify_signature()
-        .expect("signature should verify");
+    tx.verify_signature().expect("signature should verify");
 }
 
 #[test]
@@ -40,9 +39,7 @@ fn reward_issuance_is_sequential() {
 
     assert!(state.issue_sequential_coin(2, [2u8; 32], miner).is_err());
 
-    state
-        .issue_sequential_coin(1, [1u8; 32], miner)
-        .unwrap();
+    state.issue_sequential_coin(1, [1u8; 32], miner).unwrap();
 
     assert_eq!(state.issued_coin_count, 1);
     assert_eq!(state.balances.get(&miner), Some(&1));
