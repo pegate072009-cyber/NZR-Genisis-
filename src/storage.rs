@@ -100,13 +100,13 @@ pub fn verify_supply(
         "manifest exceeds maximum supply"
     );
 
-    ensure!(
-        manifest.inventory_seed.len() == 64,
-        "invalid inventory seed"
-    );
+    ensure!(manifest.inventory_seed.len() == 64, "invalid inventory seed");
 
     ensure!(
-        manifest.inventory_seed.bytes().all(|b| b.is_ascii_hexdigit()),
+        manifest
+            .inventory_seed
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit()),
         "inventory seed must be hexadecimal"
     );
 
@@ -121,8 +121,7 @@ pub fn verify_supply(
         );
 
         ensure!(
-            entry.last_coin_number
-                == entry.first_coin_number + entry.coin_records as u64 - 1,
+            entry.last_coin_number == entry.first_coin_number + entry.coin_records as u64 - 1,
             "incorrect inventory file range"
         );
 
@@ -139,11 +138,7 @@ pub fn verify_supply(
             let plaintext =
                 decrypt(key, &bytes).with_context(|| format!("decrypting {}", entry.file))?;
 
-            validate_records(
-                &plaintext,
-                entry.first_coin_number,
-                entry.coin_records,
-            )?;
+            validate_records(&plaintext, entry.first_coin_number, entry.coin_records)?;
         }
 
         total += entry.coin_records as u64;
