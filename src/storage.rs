@@ -21,7 +21,6 @@ pub fn generate_supply(
     );
 
     let total = files as u64 * coins_per_file as u64;
-
     ensure!(
         total <= MAX_SUPPLY,
         "requested supply exceeds maximum of {MAX_SUPPLY}"
@@ -32,7 +31,6 @@ pub fn generate_supply(
     let signing_key = SigningKey::from_bytes(&signing_bytes);
 
     fs::create_dir_all(output_dir)?;
-
     let mut entries = Vec::with_capacity(files as usize);
     let mut first = 1u64;
 
@@ -72,7 +70,6 @@ pub fn generate_supply(
     fs::write(output_dir.join("manifest.sig"), hex::encode(signature))?;
 
     println!("Generated {total} experimental {TICKER} coin records.");
-
     Ok(())
 }
 
@@ -89,12 +86,10 @@ pub fn verify_supply(
     verify_signature(&public_key, &manifest_bytes, &signature)?;
 
     let manifest: Manifest = serde_json::from_slice(&manifest_bytes)?;
-
     ensure!(
         manifest.network == NETWORK_NAME && manifest.ticker == TICKER,
         "wrong network identity"
     );
-
     ensure!(
         manifest.total_coin_records <= MAX_SUPPLY,
         "manifest exceeds maximum supply"
@@ -116,7 +111,6 @@ pub fn verify_supply(
         if let Some(ref key) = decrypt_key {
             let plaintext =
                 decrypt(key, &bytes).with_context(|| format!("decrypting {}", entry.file))?;
-
             validate_records(&plaintext, entry.first_coin_number, entry.coin_records)?;
         }
 
@@ -129,16 +123,12 @@ pub fn verify_supply(
         "manifest total does not match file totals"
     );
 
-    println!(
-        "VALID: {total} {TICKER} records; manifest signature and file checksums verified."
-    );
+    println!("VALID: {total} {TICKER} records; manifest signature and file checksums verified.");
 
     if decrypt_key.is_some() {
         println!("Decryption and record sequence checks also passed.");
     } else {
-        println!(
-            "Encrypted contents were not decrypted; pass --encryption-key to verify records."
-        );
+        println!("Encrypted contents were not decrypted; pass --encryption-key to verify records.");
     }
 
     Ok(())
