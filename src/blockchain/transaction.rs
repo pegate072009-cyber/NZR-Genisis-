@@ -22,15 +22,18 @@ pub struct Transaction {
 impl Transaction {
     pub fn signing_bytes(&self) -> Vec<u8> {
         let mut bytes = Vec::new();
+
         bytes.extend_from_slice(b"NEZORA-NZR-TX-V1");
         bytes.extend_from_slice(&self.version.to_be_bytes());
         bytes.extend_from_slice(&self.sender);
         bytes.extend_from_slice(&self.nonce.to_be_bytes());
         bytes.extend_from_slice(&(self.outputs.len() as u64).to_be_bytes());
+
         for output in &self.outputs {
             bytes.extend_from_slice(&output.recipient);
             bytes.extend_from_slice(&output.amount.to_be_bytes());
         }
+
         bytes.extend_from_slice(&self.public_key);
         bytes
     }
@@ -38,8 +41,10 @@ impl Transaction {
     pub fn id(&self) -> [u8; 32] {
         let mut bytes = self.signing_bytes();
         bytes.extend_from_slice(&self.signature);
+
         let digest = Sha256::digest(bytes);
         let mut id = [0u8; 32];
+
         id.copy_from_slice(&digest);
         id
     }
@@ -50,8 +55,13 @@ impl Transaction {
         outputs: Vec<TxOutput>,
         signing_key: &SigningKey,
     ) -> Result<Self> {
-        ensure!(!outputs.is_empty(), "transaction needs at least one output");
+        ensure!(
+            !outputs.is_empty(),
+            "transaction needs at least one output"
+        );
+
         let public_key = signing_key.verifying_key().to_bytes();
+
         let mut tx = Self {
             version,
             sender: public_key,
@@ -60,17 +70,32 @@ impl Transaction {
             public_key,
             signature: Vec::new(),
         };
-        tx.signature = signing_key.sign(&tx.signing_bytes()).to_bytes().to_vec();
+
+        tx.signature = signing_key
+            .sign(&tx.signing_bytes())
+            .to_bytes()
+            .to_vec();
+
         Ok(tx)
     }
 
     pub fn verify_signature(&self) -> Result<()> {
-        ensure!(self.sender == self.public_key, "sender does not match public key");
-        ensure!(!self.outputs.is_empty(), "transaction has no outputs");
+        ensure!(
+            self.sender == self.public_key,
+            "sender does not match public key"
+        );
+
+        ensure!(
+            !self.outputs.is_empty(),
+            "transaction has no outputs"
+        );
+
         let key = VerifyingKey::from_bytes(&self.public_key)?;
         let signature = Signature::from_slice(&self.signature)?;
+
         key.verify(&self.signing_bytes(), &signature)
             .map_err(|_| anyhow::anyhow!("invalid transaction signature"))?;
+
         Ok(())
     }
 }
