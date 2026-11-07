@@ -6,6 +6,7 @@ pub struct Manifest {
     pub ticker: String,
     pub format_version: u32,
     pub total_coin_records: u64,
+    pub inventory_domain_supply: u64,
     pub inventory_seed: String,
     pub files: Vec<FileEntry>,
 }
@@ -13,8 +14,8 @@ pub struct Manifest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileEntry {
     pub file: String,
-    pub first_coin_number: u64,
-    pub last_coin_number: u64,
+    pub first_slot: u64,
+    pub last_slot: u64,
     pub coin_records: u32,
     pub encrypted_sha256: String,
     pub encryption: String,
