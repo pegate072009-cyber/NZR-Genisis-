@@ -40,7 +40,11 @@ pub fn read_key(path: &Path) -> Result<[u8; 32]> {
     }
 
     let bytes = fs::read(path).with_context(|| format!("reading key {}", path.display()))?;
-    ensure!(bytes.len() == 32, "key changed size while being read: {}", path.display());
+    ensure!(
+        bytes.len() == 32,
+        "key changed size while being read: {}",
+        path.display()
+    );
 
     let mut key = [0u8; 32];
     key.copy_from_slice(&bytes);
@@ -139,7 +143,9 @@ mod tests {
     fn ed25519_rejects_modified_message() {
         let key = SigningKey::from_bytes(&[9u8; 32]);
         let signature = sign_bytes(&key, b"original");
-        assert!(verify_signature(&key.verifying_key().to_bytes(), b"modified", &signature).is_err());
+        assert!(
+            verify_signature(&key.verifying_key().to_bytes(), b"modified", &signature).is_err()
+        );
     }
 
     #[test]

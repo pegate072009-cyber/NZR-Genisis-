@@ -291,7 +291,10 @@ pub fn generate_supply(
         for coin_number in 1..=MAX_SUPPLY {
             let slot = slot_for_coin(&seed, coin_number, MAX_SUPPLY)?;
             let file_index = slot / coins_per_file as u64;
-            ensure!(file_index < files as u64, "calculated inventory file is out of range");
+            ensure!(
+                file_index < files as u64,
+                "calculated inventory file is out of range"
+            );
             let id = create_coin_record_with_seed(&seed, coin_number);
             writeln!(writers[file_index as usize], "{coin_number} {id}")?;
         }
