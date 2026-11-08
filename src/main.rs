@@ -130,7 +130,9 @@ fn init_keys(dir: &Path) -> Result<()> {
         for path in created.iter().rev() {
             let _ = fs::remove_file(path);
         }
-        return Err(error).context("key initialization failed; newly created files were cleaned up where possible");
+        return Err(error).context(
+            "key initialization failed; newly created files were cleaned up where possible",
+        );
     }
 
     println!("Nezora keys created.");

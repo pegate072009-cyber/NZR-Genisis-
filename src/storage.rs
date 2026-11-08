@@ -439,10 +439,8 @@ pub fn verify_supply(
         ensure!(record_count == entry.coin_records as u64, "inventory record count mismatch");
 
         let encrypted_path = input_dir.join(&entry.file);
-        let encrypted = read_regular_file(
-            &encrypted_path,
-            Some(MAX_ENCRYPTED_INVENTORY_FILE_BYTES),
-        )?;
+        let encrypted =
+            read_regular_file(&encrypted_path, Some(MAX_ENCRYPTED_INVENTORY_FILE_BYTES))?;
 
         ensure!(
             sha256_hex(&encrypted) == entry.encrypted_sha256,
@@ -470,11 +468,20 @@ pub fn verify_supply(
 
                 let coin_id = fields.next().context("missing coin ID")?;
 
-                ensure!(fields.next().is_none(), "unexpected extra field in inventory record");
-                ensure!((1..=MAX_SUPPLY).contains(&coin_number), "coin number outside supply range");
+                ensure!(
+                    fields.next().is_none(),
+                    "unexpected extra field in inventory record"
+                );
+                ensure!(
+                    (1..=MAX_SUPPLY).contains(&coin_number),
+                    "coin number outside supply range"
+                );
 
                 let expected_id = create_coin_record_with_seed(&seed, coin_number);
-                ensure!(coin_id == expected_id, "coin record ID mismatch for coin {coin_number}");
+                ensure!(
+                    coin_id == expected_id,
+                    "coin record ID mismatch for coin {coin_number}"
+                );
 
                 let slot = slot_for_coin(&seed, coin_number, MAX_SUPPLY)?;
                 ensure!(
@@ -514,7 +521,10 @@ pub fn verify_supply(
             .context("slot range overflow")?;
     }
 
-    ensure!(total_records == MAX_SUPPLY, "manifest does not cover the full supply");
+    ensure!(
+        total_records == MAX_SUPPLY,
+        "manifest does not cover the full supply"
+    );
 
     if encryption_key.is_some() {
         ensure!(
@@ -630,8 +640,6 @@ mod tests {
         let path = temp.path().join("oversized.enc");
         fs::write(&path, b"12345").unwrap();
 
-        assert!(
-            read_regular_file(&path, Some(4)).is_err()
-        );
+        assert!(read_regular_file(&path, Some(4)).is_err());
     }
 }
