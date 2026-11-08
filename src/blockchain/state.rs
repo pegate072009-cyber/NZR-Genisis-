@@ -95,13 +95,7 @@ mod tests {
         recipient: [u8; 32],
         amount: u64,
     ) -> Transaction {
-        Transaction::sign(
-            2,
-            nonce,
-            vec![TxOutput { recipient, amount }],
-            key,
-        )
-        .unwrap()
+        Transaction::sign(2, nonce, vec![TxOutput { recipient, amount }], key).unwrap()
     }
 
     fn funded_state(sender: [u8; 32], amount: u64) -> LedgerState {
