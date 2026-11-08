@@ -144,17 +144,16 @@ mod tests {
     #[test]
     fn rejects_zero_value_output() {
         let key = SigningKey::from_bytes(&[7u8; 32]);
-        assert!(
-            Transaction::sign(
-                2,
-                0,
-                vec![TxOutput {
-                    recipient: [3u8; 32],
-                    amount: 0,
-                }],
-                &key,
-            )
-            .is_err()
-        );
+
+        assert!(Transaction::sign(
+            2,
+            0,
+            vec![TxOutput {
+                recipient: [3u8; 32],
+                amount: 0,
+            }],
+            &key,
+        )
+        .is_err());
     }
 }

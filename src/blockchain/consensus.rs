@@ -32,7 +32,10 @@ impl Default for ConsensusParams {
 
 impl ConsensusParams {
     pub fn validate(&self) -> Result<()> {
-        ensure!(self.protocol_version > 0, "protocol version must be positive");
+        ensure!(
+            self.protocol_version > 0,
+            "protocol version must be positive"
+        );
         ensure!(self.max_supply > 0, "maximum supply must be positive");
         ensure!(self.block_reward == 1, "Nezora block reward must be 1 NZR");
         ensure!(
