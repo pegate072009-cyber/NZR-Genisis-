@@ -628,4 +628,3 @@ mod recovery_tests {
         assert!(backup.join("reserved.txt").exists());
     }
 }
-
