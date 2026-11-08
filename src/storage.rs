@@ -618,11 +618,7 @@ mod tests {
         let signature = sign_bytes(&signing_key, &manifest_bytes);
 
         fs::write(inventory_dir.join("manifest.json"), manifest_bytes).unwrap();
-        fs::write(
-            inventory_dir.join("manifest.sig"),
-            hex::encode(signature),
-        )
-        .unwrap();
+        fs::write(inventory_dir.join("manifest.sig"), hex::encode(signature)).unwrap();
 
         (inventory_dir, public_key_path)
     }
