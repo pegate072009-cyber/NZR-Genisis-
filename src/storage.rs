@@ -72,7 +72,8 @@ fn recover_publication(output_dir: &Path) -> Result<()> {
     let backup_exists = path_exists(&backup)?;
 
     if !output_exists && backup_exists {
-        fs::rename(&backup, output_dir).context("restoring previous Nezora inventory backup")?;
+        fs::rename(&backup, output_dir)
+            .context("restoring previous Nezora inventory backup")?;
     } else if output_exists && backup_exists {
         // The new directory was published. Its backup is no longer needed.
         remove_managed_directory(&backup)?;
@@ -134,8 +135,7 @@ fn publish_staging(output_dir: &Path, staging: &Path, backup: &Path) -> Result<(
             "output path must be a directory"
         );
 
-        fs::rename(output_dir, backup)
-            .context("moving previous inventory into backup")?;
+        fs::rename(output_dir, backup).context("moving previous inventory into backup")?;
     }
 
     if let Err(error) = fs::rename(staging, output_dir) {
@@ -530,5 +530,4 @@ pub fn verify_supply(
     println!("VALID: {total} {TICKER} inventory records.");
 
     Ok(())
-}
-        
+}                
