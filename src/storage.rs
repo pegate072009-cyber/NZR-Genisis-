@@ -261,7 +261,6 @@ pub fn verify_supply(
         .map_err(|_| anyhow::anyhow!("integrity bitmap is too large"))?;
 
     let mut seen_coin_numbers = decrypt_key.as_ref().map(|_| vec![0u8; bitmap_len]);
-
     let mut seen_slots = decrypt_key.as_ref().map(|_| vec![0u8; bitmap_len]);
 
     let mut total = 0u64;
@@ -411,7 +410,9 @@ pub fn verify_supply(
             "inventory is missing one or more inventory slots"
         );
 
-        println!("GLOBAL INTEGRITY: all coin numbers and inventory slots are unique and present.");
+        println!(
+            "GLOBAL INTEGRITY: all coin numbers and inventory slots are unique and present."
+        );
     } else {
         println!(
             "WARNING: encrypted records were not decrypted; global uniqueness was not checked."
@@ -421,4 +422,4 @@ pub fn verify_supply(
     println!("VALID: {total} {TICKER} inventory records.");
 
     Ok(())
-                }
+    }
