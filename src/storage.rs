@@ -72,13 +72,16 @@ fn recover_publication(output_dir: &Path) -> Result<()> {
     let backup_exists = path_exists(&backup)?;
 
     if !output_exists && backup_exists {
-        fs::rename(&backup, output_dir).context("restoring previous Nezora inventory backup")?;
+        fs::rename(&backup, output_dir)
+            .context("restoring previous Nezora inventory backup")?;
     } else if output_exists && backup_exists {
-        // The new directory was published. Its backup is no longer needed.
-        remove_managed_directory(&backup)?;
+        anyhow::bail!(
+            "recovery is ambiguous: both output and backup exist; \
+             preserving both directories for manual verification"
+        );
     }
 
-    // An unpublished staging directory is never authoritative.
+    // Staging is never authoritative.
     remove_managed_directory(&staging)?;
 
     Ok(())
@@ -519,7 +522,9 @@ pub fn verify_supply(
             "inventory is missing one or more inventory slots"
         );
 
-        println!("GLOBAL INTEGRITY: all coin numbers and inventory slots are unique and present.");
+        println!(
+            "GLOBAL INTEGRITY: all coin numbers and inventory slots are unique and present."
+        );
     } else {
         println!(
             "WARNING: encrypted records were not decrypted; global uniqueness was not checked."
@@ -558,7 +563,7 @@ mod recovery_tests {
     }
 
     #[test]
-    fn removes_backup_when_output_already_exists() {
+    fn preserves_backup_when_output_already_exists() {
         let temp = tempdir().unwrap();
         let output = temp.path().join("inventory");
         let backup = sibling_path(&output, ".backup").unwrap();
@@ -569,10 +574,11 @@ mod recovery_tests {
         fs::create_dir(&backup).unwrap();
         fs::write(backup.join("old.txt"), b"old inventory").unwrap();
 
-        recover_publication(&output).unwrap();
+        let result = recover_publication(&output);
 
+        assert!(result.is_err());
         assert!(output.join("current.txt").exists());
-        assert!(!backup.exists());
+        assert!(backup.join("old.txt").exists());
     }
 
     #[test]
