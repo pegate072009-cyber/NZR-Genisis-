@@ -220,9 +220,7 @@ mod tests {
         let block = candidate_block(&params, reward_id, Vec::new());
         let mut chain = Chain::default();
 
-        chain
-            .accept_block(block, reward_id, &params, NOW)
-            .unwrap();
+        chain.accept_block(block, reward_id, &params, NOW).unwrap();
 
         assert_eq!(chain.height(), 1);
         assert_eq!(chain.state.issued_coin_count, 1);
@@ -323,9 +321,12 @@ mod tests {
 
     #[test]
     fn apply_block_transactions_is_atomic_on_failed_transaction() {
-        let params = ConsensusParams::default();
         let reward_id = [20u8; 32];
-        let block = candidate_block(&params, reward_id, vec![signed_test_transaction()]);
+        let block = candidate_block(
+            &ConsensusParams::default(),
+            reward_id,
+            vec![signed_test_transaction()],
+        );
         let mut state = LedgerState::default();
         let before = state.clone();
 
