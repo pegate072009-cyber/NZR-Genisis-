@@ -72,8 +72,7 @@ fn recover_publication(output_dir: &Path) -> Result<()> {
     let backup_exists = path_exists(&backup)?;
 
     if !output_exists && backup_exists {
-        fs::rename(&backup, output_dir)
-            .context("restoring previous Nezora inventory backup")?;
+        fs::rename(&backup, output_dir).context("restoring previous Nezora inventory backup")?;
     } else if output_exists && backup_exists {
         anyhow::bail!(
             "recovery is ambiguous: both output and backup exist; \
@@ -522,9 +521,7 @@ pub fn verify_supply(
             "inventory is missing one or more inventory slots"
         );
 
-        println!(
-            "GLOBAL INTEGRITY: all coin numbers and inventory slots are unique and present."
-        );
+        println!("GLOBAL INTEGRITY: all coin numbers and inventory slots are unique and present.");
     } else {
         println!(
             "WARNING: encrypted records were not decrypted; global uniqueness was not checked."
@@ -633,4 +630,4 @@ mod recovery_tests {
         assert!(staging.join("new.txt").exists());
         assert!(backup.join("reserved.txt").exists());
     }
-}
+}                        
