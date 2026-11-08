@@ -276,12 +276,12 @@ pub fn verify_supply(
         "inventory slot coverage is incomplete"
     );
 
-    ensure!(
+        ensure!(
         total == manifest.total_coin_records,
         "manifest total does not match file totals"
     );
 
-            println!("VALID: {total} {TICKER} inventory records.");
+    println!("VALID: {total} {TICKER} inventory records.");
 
     Ok(())
 }
