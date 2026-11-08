@@ -55,8 +55,7 @@ fn permute_domain(seed: &[u8; 32], value: u64, parameters: DomainParameters) -> 
 
     for round in 0..ROUNDS {
         let next_left = right;
-        let next_right =
-            left ^ round_function(seed, round, right, parameters.half_mask);
+        let next_right = left ^ round_function(seed, round, right, parameters.half_mask);
 
         left = next_left;
         right = next_right;
@@ -110,12 +109,7 @@ pub fn slots_for_range(
     slots.try_reserve_exact(count as usize)?;
 
     for number in first_coin_number..=last {
-        slots.push(slot_with_parameters(
-            seed,
-            number,
-            supply,
-            parameters,
-        )?);
+        slots.push(slot_with_parameters(seed, number, supply, parameters)?);
     }
 
     Ok(slots)
@@ -229,15 +223,7 @@ mod tests {
         let seed = [19u8; 32];
         let supply = 30_000_000u64;
 
-        for number in [
-            1,
-            2,
-            100,
-            1_000_000,
-            15_000_000,
-            29_999_999,
-            30_000_000,
-        ] {
+        for number in [1, 2, 100, 1_000_000, 15_000_000, 29_999_999, 30_000_000] {
             let slot = slot_for_coin(&seed, number, supply).unwrap();
             assert!(slot < supply);
         }
