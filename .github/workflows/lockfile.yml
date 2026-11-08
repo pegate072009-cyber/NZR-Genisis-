@@ -1,7 +1,11 @@
+
 name: Generate Cargo Lockfile
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -29,3 +33,4 @@ jobs:
           path: Cargo.lock
           if-no-files-found: error
           retention-days: 7
+          
