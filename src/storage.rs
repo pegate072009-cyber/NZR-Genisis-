@@ -276,7 +276,12 @@ pub fn verify_supply(
         "inventory slot coverage is incomplete"
     );
 
-        ensure!(
+            ensure!(
+        expected_slot == MAX_SUPPLY,
+        "inventory slot coverage is incomplete"
+    );
+
+    ensure!(
         total == manifest.total_coin_records,
         "manifest total does not match file totals"
     );
