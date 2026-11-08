@@ -9,7 +9,6 @@ use anyhow::{ensure, Context, Result};
 use ed25519_dalek::SigningKey;
 use rand::{rngs::OsRng, RngCore};
 use std::{
-    collections::HashSet,
     fs::{self, File, OpenOptions},
     io::{BufWriter, Write},
     path::{Path, PathBuf},
@@ -377,7 +376,6 @@ pub fn verify_supply(
 ) -> Result<()> {
     validate_input_directory(input_dir)?;
 
-    // Keep the signed manifest small enough to parse safely.
     const MAX_MANIFEST_BYTES: u64 = 1_048_576;
     const MAX_SIGNATURE_HEX_BYTES: u64 = 256;
 
@@ -475,15 +473,12 @@ pub fn verify_supply(
             entry.file
         );
 
-                if let Some(key) = encryption_key.as_ref() {
-            let plaintext =
-                decrypt(key,
-            &encrypted).with_context(|| format!("decrypting 
-            {}", entry.file))?;
+        if let Some(key) = encryption_key.as_ref() {
+            let plaintext = decrypt(key, &encrypted)
+                .with_context(|| format!("decrypting {}", entry.file))?;
 
-             let text = std::str::from_utf8(&plaintext)
-                .with_context(|| format!("{} is not valid 
-            UTF-8", entry.file))?;
+            let text = std::str::from_utf8(&plaintext)
+                .with_context(|| format!("{} is not valid UTF-8", entry.file))?;
 
             let mut file_records = 0u64;
 
@@ -567,7 +562,9 @@ pub fn verify_supply(
             "not all inventory slots are present"
         );
 
-        println!("GLOBAL INTEGRITY: all coin numbers and inventory slots are unique and present.");
+        println!(
+            "GLOBAL INTEGRITY: all coin numbers and inventory slots are unique and present."
+        );
     } else {
         println!(
             "Manifest signature and encrypted file checksums are valid. \
