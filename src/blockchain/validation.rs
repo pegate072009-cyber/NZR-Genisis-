@@ -143,38 +143,201 @@ pub fn apply_block_transactions(block: &Block, state: &mut LedgerState) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blockchain::{
+        block::Block,
+        chain::Chain,
+        consensus::ConsensusParams,
+        merkle::merkle_root,
+        state::LedgerState,
+        transaction::{Transaction, TxOutput},
+    };
+    use ed25519_dalek::SigningKey;
 
-    #[test]
-    fn proof_of_work_rejects_zero_difficulty() {
-        // The consensus parameter validator rejects zero before this helper
-        // can be used as a block-acceptance rule.
-        let params = ConsensusParams {
-            initial_difficulty_bits: 0,
-            ..ConsensusParams::default()
+    const NOW: u64 = 1_000_000;
+
+    fn candidate_block(
+        params: &ConsensusParams,
+        reward_id: [u8; 32],
+        transactions: Vec<Transaction>,
+    ) -> Block {
+        let mut block = Block {
+            version: params.protocol_version,
+            height: 1,
+            previous_hash: [0u8; 32],
+            timestamp: NOW,
+            reward_coin_number: 1,
+            reward_coin_id: reward_id,
+            miner_address: [7u8; 32],
+            transactions,
+            transaction_root: [0u8; 32],
+            nonce: 0,
+            difficulty_bits: params.initial_difficulty_bits,
         };
-        assert!(params.validate().is_err());
-    }
 
-    #[test]
-    fn proof_of_work_bit_boundary_is_checked() {
-        let mut hash = [0u8; 32];
-        assert!(meets_target(&hash, 8));
-        hash[0] = 1;
-        assert!(!meets_target(&hash, 8));
-        hash[0] = 0;
-        hash[1] = 0b1000_0000;
-        assert!(!meets_target(&hash, 9));
-    }
+        block.transaction_root = block.calculate_transaction_root();
 
-    #[test]
-    fn proof_of_work_accepts_zero_bit_hash_target_only_after_params_validation() {
-        let hash = [0u8; 32];
-        assert!(meets_target(&hash, 0));
-        assert!(ConsensusParams {
-            initial_difficulty_bits: 0,
-            ..ConsensusParams::default()
+        while !meets_target(&block.hash(), block.difficulty_bits) {
+            block.nonce = block.nonce.checked_add(1).unwrap();
         }
-        .validate()
-        .is_err());
+
+        block
+    }
+
+    fn signed_test_transaction() -> Transaction {
+        let key = SigningKey::from_bytes(&[19u8; 32]);
+        Transaction::sign(
+            2,
+            0,
+            vec![TxOutput {
+                recipient: [8u8; 32],
+                amount: 1,
+            }],
+            &key,
+        )
+        .unwrap()
+    }
+
+    fn assert_rejected_without_state_change(block: Block, expected_reward_id: [u8; 32]) {
+        let params = ConsensusParams::default();
+        let mut chain = Chain::default();
+        let before = chain.state.clone();
+
+        assert!(chain
+            .accept_block(block, expected_reward_id, &params, NOW)
+            .is_err());
+        assert_eq!(chain.state.balances, before.balances);
+        assert_eq!(chain.state.next_nonce, before.next_nonce);
+        assert_eq!(chain.state.issued_coin_ids, before.issued_coin_ids);
+        assert_eq!(chain.state.issued_coin_count, before.issued_coin_count);
+        assert!(chain.blocks.is_empty());
+    }
+
+    #[test]
+    fn accepts_valid_mined_block_and_issues_one_reward() {
+        let params = ConsensusParams::default();
+        let reward_id = [3u8; 32];
+        let miner = [7u8; 32];
+        let block = candidate_block(&params, reward_id, Vec::new());
+        let mut chain = Chain::default();
+
+        chain
+            .accept_block(block, reward_id, &params, NOW)
+            .unwrap();
+
+        assert_eq!(chain.height(), 1);
+        assert_eq!(chain.state.issued_coin_count, 1);
+        assert_eq!(chain.state.balances.get(&miner), Some(&1));
+        assert!(chain.state.issued_coin_ids.contains(&reward_id));
+    }
+
+    #[test]
+    fn rejects_wrong_protocol_version_without_state_change() {
+        let params = ConsensusParams::default();
+        let reward_id = [4u8; 32];
+        let mut block = candidate_block(&params, reward_id, Vec::new());
+        block.version = 1;
+        assert_rejected_without_state_change(block, reward_id);
+    }
+
+    #[test]
+    fn rejects_wrong_height_without_state_change() {
+        let params = ConsensusParams::default();
+        let reward_id = [5u8; 32];
+        let mut block = candidate_block(&params, reward_id, Vec::new());
+        block.height = 2;
+        assert_rejected_without_state_change(block, reward_id);
+    }
+
+    #[test]
+    fn rejects_wrong_previous_hash_without_state_change() {
+        let params = ConsensusParams::default();
+        let reward_id = [6u8; 32];
+        let mut block = candidate_block(&params, reward_id, Vec::new());
+        block.previous_hash = [9u8; 32];
+        assert_rejected_without_state_change(block, reward_id);
+    }
+
+    #[test]
+    fn rejects_wrong_reward_number_without_state_change() {
+        let params = ConsensusParams::default();
+        let reward_id = [10u8; 32];
+        let mut block = candidate_block(&params, reward_id, Vec::new());
+        block.reward_coin_number = 2;
+        assert_rejected_without_state_change(block, reward_id);
+    }
+
+    #[test]
+    fn rejects_wrong_reward_id_without_state_change() {
+        let params = ConsensusParams::default();
+        let reward_id = [11u8; 32];
+        let mut block = candidate_block(&params, reward_id, Vec::new());
+        block.reward_coin_id = [12u8; 32];
+        assert_rejected_without_state_change(block, reward_id);
+    }
+
+    #[test]
+    fn rejects_future_timestamp_without_state_change() {
+        let params = ConsensusParams::default();
+        let reward_id = [13u8; 32];
+        let mut block = candidate_block(&params, reward_id, Vec::new());
+        block.timestamp = NOW + params.max_future_drift_secs + 1;
+        assert_rejected_without_state_change(block, reward_id);
+    }
+
+    #[test]
+    fn rejects_modified_transaction_root_without_state_change() {
+        let params = ConsensusParams::default();
+        let reward_id = [14u8; 32];
+        let mut block = candidate_block(&params, reward_id, Vec::new());
+        block.transaction_root = [15u8; 32];
+        assert_rejected_without_state_change(block, reward_id);
+    }
+
+    #[test]
+    fn rejects_duplicate_transaction_without_state_change() {
+        let params = ConsensusParams::default();
+        let reward_id = [16u8; 32];
+        let tx = signed_test_transaction();
+        let block = candidate_block(&params, reward_id, vec![tx.clone(), tx]);
+        assert_rejected_without_state_change(block, reward_id);
+    }
+
+    #[test]
+    fn rejects_invalid_transaction_signature_without_state_change() {
+        let params = ConsensusParams::default();
+        let reward_id = [17u8; 32];
+        let mut tx = signed_test_transaction();
+        tx.signature[0] ^= 0x01;
+        let block = candidate_block(&params, reward_id, vec![tx]);
+        assert_rejected_without_state_change(block, reward_id);
+    }
+
+    #[test]
+    fn rejects_wrong_difficulty_without_state_change() {
+        let params = ConsensusParams::default();
+        let reward_id = [18u8; 32];
+        let mut block = candidate_block(&params, reward_id, Vec::new());
+        block.difficulty_bits = params.initial_difficulty_bits + 1;
+        assert_rejected_without_state_change(block, reward_id);
+    }
+
+    #[test]
+    fn apply_block_transactions_is_atomic_on_failed_transaction() {
+        let params = ConsensusParams::default();
+        let reward_id = [20u8; 32];
+        let block = candidate_block(&params, reward_id, vec![signed_test_transaction()]);
+        let mut state = LedgerState::default();
+        let before = state.clone();
+
+        assert!(apply_block_transactions(&block, &mut state).is_err());
+        assert_eq!(state.balances, before.balances);
+        assert_eq!(state.next_nonce, before.next_nonce);
+        assert_eq!(state.issued_coin_ids, before.issued_coin_ids);
+        assert_eq!(state.issued_coin_count, before.issued_coin_count);
+    }
+
+    #[test]
+    fn merkle_root_for_empty_transaction_list_is_consistent() {
+        assert_eq!(merkle_root(&[]), merkle_root(&[]));
     }
 }
