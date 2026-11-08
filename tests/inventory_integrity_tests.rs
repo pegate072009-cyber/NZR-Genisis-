@@ -36,8 +36,10 @@ fn mapping_is_deterministic_for_same_seed() {
     let supply = 4096;
 
     for coin_number in [1, 2, 3, 17, 255, 1024, 2048, 4096] {
-        let first = slot_for_coin(&seed, coin_number, supply)
-            .expect("first mapping should succeed");
+                let first =
+            slot_for_coin(&seed, coin_number, supply).expect("first mapping should succeed");
+        let second =
+            slot_for_coin(&seed, coin_number, supply).expect("second mapping should succeed");
         let second = slot_for_coin(&seed, coin_number, supply)
             .expect("second mapping should succeed");
 
