@@ -16,6 +16,10 @@ use std::{
 
 const INVENTORY_FORMAT_VERSION: u32 = 2;
 const INVENTORY_ENCRYPTION: &str = "AES-256-GCM";
+const MAX_MANIFEST_BYTES: u64 = 1_048_576;
+const MAX_SIGNATURE_HEX_BYTES: u64 = 256;
+// Operational safety ceiling. Raise only with an explicit deployment capacity review.
+const MAX_ENCRYPTED_INVENTORY_FILE_BYTES: u64 = 512 * 1024 * 1024;
 
 struct GenerationLock {
     path: PathBuf,
@@ -287,10 +291,7 @@ pub fn generate_supply(
         for coin_number in 1..=MAX_SUPPLY {
             let slot = slot_for_coin(&seed, coin_number, MAX_SUPPLY)?;
             let file_index = slot / coins_per_file as u64;
-            ensure!(
-                file_index < files as u64,
-                "calculated inventory file is out of range"
-            );
+            ensure!(file_index < files as u64, "calculated inventory file is out of range");
             let id = create_coin_record_with_seed(&seed, coin_number);
             writeln!(writers[file_index as usize], "{coin_number} {id}")?;
         }
@@ -376,9 +377,6 @@ pub fn verify_supply(
 ) -> Result<()> {
     validate_input_directory(input_dir)?;
 
-    const MAX_MANIFEST_BYTES: u64 = 1_048_576;
-    const MAX_SIGNATURE_HEX_BYTES: u64 = 256;
-
     let manifest_bytes =
         read_regular_file(&input_dir.join("manifest.json"), Some(MAX_MANIFEST_BYTES))?;
     let signature_bytes = read_regular_file(
@@ -393,24 +391,12 @@ pub fn verify_supply(
 
     let manifest: Manifest = serde_json::from_slice(&manifest_bytes)?;
 
-    ensure!(
-        manifest.format_version == INVENTORY_FORMAT_VERSION,
-        "unsupported inventory format version"
-    );
+    ensure!(manifest.format_version == INVENTORY_FORMAT_VERSION, "unsupported inventory format version");
     ensure!(manifest.network == NETWORK_NAME, "wrong network");
     ensure!(manifest.ticker == TICKER, "wrong ticker");
-    ensure!(
-        manifest.total_coin_records == MAX_SUPPLY,
-        "manifest total supply mismatch"
-    );
-    ensure!(
-        manifest.inventory_domain_supply == MAX_SUPPLY,
-        "manifest inventory domain mismatch"
-    );
-    ensure!(
-        !manifest.files.is_empty(),
-        "manifest contains no inventory files"
-    );
+    ensure!(manifest.total_coin_records == MAX_SUPPLY, "manifest total supply mismatch");
+    ensure!(manifest.inventory_domain_supply == MAX_SUPPLY, "manifest inventory domain mismatch");
+    ensure!(!manifest.files.is_empty(), "manifest contains no inventory files");
 
     let seed_bytes = hex::decode(&manifest.inventory_seed)?;
     let seed: [u8; 32] = seed_bytes
@@ -440,18 +426,9 @@ pub fn verify_supply(
     for (index, entry) in manifest.files.iter().enumerate() {
         validate_inventory_filename(&entry.file, index)?;
 
-        ensure!(
-            entry.encryption == INVENTORY_ENCRYPTION,
-            "unsupported encryption type"
-        );
-        ensure!(
-            entry.first_slot == expected_first_slot,
-            "inventory slot ranges are not contiguous"
-        );
-        ensure!(
-            entry.last_slot >= entry.first_slot,
-            "invalid inventory slot range"
-        );
+        ensure!(entry.encryption == INVENTORY_ENCRYPTION, "unsupported encryption type");
+        ensure!(entry.first_slot == expected_first_slot, "inventory slot ranges are not contiguous");
+        ensure!(entry.last_slot >= entry.first_slot, "invalid inventory slot range");
 
         let record_count = entry
             .last_slot
@@ -459,13 +436,13 @@ pub fn verify_supply(
             .and_then(|value| value.checked_add(1))
             .context("inventory range overflow")?;
 
-        ensure!(
-            record_count == entry.coin_records as u64,
-            "inventory record count mismatch"
-        );
+        ensure!(record_count == entry.coin_records as u64, "inventory record count mismatch");
 
         let encrypted_path = input_dir.join(&entry.file);
-        let encrypted = read_regular_file(&encrypted_path, None)?;
+        let encrypted = read_regular_file(
+            &encrypted_path,
+            Some(MAX_ENCRYPTED_INVENTORY_FILE_BYTES),
+        )?;
 
         ensure!(
             sha256_hex(&encrypted) == entry.encrypted_sha256,
@@ -493,23 +470,13 @@ pub fn verify_supply(
 
                 let coin_id = fields.next().context("missing coin ID")?;
 
-                ensure!(
-                    fields.next().is_none(),
-                    "unexpected extra field in inventory record"
-                );
-                ensure!(
-                    (1..=MAX_SUPPLY).contains(&coin_number),
-                    "coin number outside supply range"
-                );
+                ensure!(fields.next().is_none(), "unexpected extra field in inventory record");
+                ensure!((1..=MAX_SUPPLY).contains(&coin_number), "coin number outside supply range");
 
                 let expected_id = create_coin_record_with_seed(&seed, coin_number);
-                ensure!(
-                    coin_id == expected_id,
-                    "coin record ID mismatch for coin {coin_number}"
-                );
+                ensure!(coin_id == expected_id, "coin record ID mismatch for coin {coin_number}");
 
                 let slot = slot_for_coin(&seed, coin_number, MAX_SUPPLY)?;
-
                 ensure!(
                     (entry.first_slot..=entry.last_slot).contains(&slot),
                     "coin is stored in the wrong inventory file"
@@ -547,10 +514,7 @@ pub fn verify_supply(
             .context("slot range overflow")?;
     }
 
-    ensure!(
-        total_records == MAX_SUPPLY,
-        "manifest does not cover the full supply"
-    );
+    ensure!(total_records == MAX_SUPPLY, "manifest does not cover the full supply");
 
     if encryption_key.is_some() {
         ensure!(
@@ -658,5 +622,16 @@ mod tests {
             std::os::unix::fs::symlink(&actual, &link).unwrap();
             assert!(validate_input_directory(&link).is_err());
         }
+    }
+
+    #[test]
+    fn rejects_oversized_encrypted_inventory_file() {
+        let temp = tempdir().unwrap();
+        let path = temp.path().join("oversized.enc");
+        fs::write(&path, b"12345").unwrap();
+
+        assert!(
+            read_regular_file(&path, Some(4)).is_err()
+        );
     }
 }
