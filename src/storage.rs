@@ -305,10 +305,6 @@ pub fn verify_supply(
     println!("VALID: {total} {TICKER} inventory records.");
 
     if decrypt_key.is_some() {
-        println!("GLOBAL INTEGRITY: all coin numbers are unique.");
-    } else {
-        println!("WARNING: encrypted records were not decrypted; global uniqueness was not checked.");
-    }
-
-    Ok(())
-                    }
+                println!(
+            "WARNING: encrypted records were not decrypted; global uniqueness was not checked."
+        );
