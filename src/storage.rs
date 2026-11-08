@@ -72,8 +72,7 @@ fn recover_publication(output_dir: &Path) -> Result<()> {
     let backup_exists = path_exists(&backup)?;
 
     if !output_exists && backup_exists {
-        fs::rename(&backup, output_dir)
-            .context("restoring previous Nezora inventory backup")?;
+        fs::rename(&backup, output_dir).context("restoring previous Nezora inventory backup")?;
     } else if output_exists && backup_exists {
         // The new directory was published. Its backup is no longer needed.
         remove_managed_directory(&backup)?;
@@ -530,4 +529,4 @@ pub fn verify_supply(
     println!("VALID: {total} {TICKER} inventory records.");
 
     Ok(())
-}                
+}
