@@ -39,8 +39,8 @@ fn validate_inventory_filename(name: &str, index: usize) -> Result<()> {
 }
 
 fn set_seen_bit(bitmap: &mut [u8], value: u64, description: &str) -> Result<()> {
-    let index = usize::try_from(value)
-        .map_err(|_| anyhow::anyhow!("{description} index is too large"))?;
+    let index =
+        usize::try_from(value).map_err(|_| anyhow::anyhow!("{description} index is too large"))?;
 
     let byte_index = index / 8;
     let bit_mask = 1u8 << (index % 8);
@@ -56,10 +56,7 @@ fn set_seen_bit(bitmap: &mut [u8], value: u64, description: &str) -> Result<()> 
 }
 
 fn bitmap_count(bitmap: &[u8]) -> u64 {
-    bitmap
-        .iter()
-        .map(|byte| byte.count_ones() as u64)
-        .sum()
+    bitmap.iter().map(|byte| byte.count_ones() as u64).sum()
 }
 
 pub fn generate_supply(
@@ -90,10 +87,7 @@ pub fn generate_supply(
     let mut random_name = [0u8; 16];
     OsRng.fill_bytes(&mut random_name);
 
-    let temp_dir = output_dir.join(format!(
-        ".nezora-temp-{}",
-        hex::encode(random_name)
-    ));
+    let temp_dir = output_dir.join(format!(".nezora-temp-{}", hex::encode(random_name)));
 
     fs::create_dir(&temp_dir)?;
 
@@ -116,10 +110,7 @@ pub fn generate_supply(
 
             let id = create_coin_record_with_seed(&seed, coin_number);
 
-            writeln!(
-                writers[file_index as usize],
-                "{coin_number} {id}"
-            )?;
+            writeln!(writers[file_index as usize], "{coin_number} {id}")?;
         }
 
         for writer in &mut writers {
@@ -140,8 +131,7 @@ pub fn generate_supply(
                 .checked_add(coins_per_file as u64 - 1)
                 .ok_or_else(|| anyhow::anyhow!("slot calculation overflow"))?;
 
-            let temp_path =
-                temp_dir.join(format!("inventory.{index:02}.tmp"));
+            let temp_path = temp_dir.join(format!("inventory.{index:02}.tmp"));
 
             let plaintext = fs::read(&temp_path)?;
             let encrypted = encrypt(&encryption_key, &plaintext)?;
@@ -198,11 +188,7 @@ pub fn generate_supply(
     let signature = sign_bytes(&signing_key, &manifest_bytes);
 
     fs::write(output_dir.join("manifest.json"), &manifest_bytes)?;
-
-    fs::write(
-        output_dir.join("manifest.sig"),
-        hex::encode(signature),
-    )?;
+    fs::write(output_dir.join("manifest.sig"), hex::encode(signature))?;
 
     println!("Generated {total} experimental {TICKER} records.");
 
@@ -216,8 +202,7 @@ pub fn verify_supply(
 ) -> Result<()> {
     let manifest_bytes = fs::read(input_dir.join("manifest.json"))?;
 
-    let signature_hex =
-        fs::read_to_string(input_dir.join("manifest.sig"))?;
+    let signature_hex = fs::read_to_string(input_dir.join("manifest.sig"))?;
 
     let signature = hex::decode(signature_hex.trim())?;
     let public_key = read_key(public_key_path)?;
@@ -232,8 +217,7 @@ pub fn verify_supply(
     );
 
     ensure!(
-        manifest.network == NETWORK_NAME
-            && manifest.ticker == TICKER,
+        manifest.network == NETWORK_NAME && manifest.ticker == TICKER,
         "wrong network identity"
     );
 
@@ -247,17 +231,11 @@ pub fn verify_supply(
         "incomplete inventory"
     );
 
-    ensure!(
-        !manifest.files.is_empty(),
-        "inventory contains no files"
-    );
+    ensure!(!manifest.files.is_empty(), "inventory contains no files");
 
     let first_file_capacity = manifest.files[0].coin_records as u64;
 
-    ensure!(
-        first_file_capacity > 0,
-        "invalid file capacity"
-    );
+    ensure!(first_file_capacity > 0, "invalid file capacity");
 
     let file_count = u64::try_from(manifest.files.len())
         .map_err(|_| anyhow::anyhow!("too many inventory files"))?;
@@ -282,11 +260,9 @@ pub fn verify_supply(
     let bitmap_len = usize::try_from((MAX_SUPPLY + 7) / 8)
         .map_err(|_| anyhow::anyhow!("integrity bitmap is too large"))?;
 
-    let mut seen_coin_numbers =
-        decrypt_key.as_ref().map(|_| vec![0u8; bitmap_len]);
+    let mut seen_coin_numbers = decrypt_key.as_ref().map(|_| vec![0u8; bitmap_len]);
 
-    let mut seen_slots =
-        decrypt_key.as_ref().map(|_| vec![0u8; bitmap_len]);
+    let mut seen_slots = decrypt_key.as_ref().map(|_| vec![0u8; bitmap_len]);
 
     let mut total = 0u64;
     let mut expected_slot = 0u64;
@@ -316,10 +292,7 @@ pub fn verify_supply(
             "slot sequence gap or overlap"
         );
 
-        ensure!(
-            entry.coin_records > 0,
-            "empty inventory file"
-        );
+        ensure!(entry.coin_records > 0, "empty inventory file");
 
         let expected_last = entry
             .first_slot
@@ -362,7 +335,10 @@ pub fn verify_supply(
 
                 ensure!(parts.next().is_none(), "unexpected extra field");
 
-                ensure!((1..=MAX_SUPPLY).contains(&number), "invalid coin number");
+                ensure!(
+                    (1..=MAX_SUPPLY).contains(&number),
+                    "invalid coin number"
+                );
 
                 ensure!(
                     number > previous_number,
@@ -438,9 +414,7 @@ pub fn verify_supply(
             "inventory is missing one or more inventory slots"
         );
 
-        println!(
-            "GLOBAL INTEGRITY: all coin numbers and inventory slots are unique and present."
-        );
+        println!("GLOBAL INTEGRITY: all coin numbers and inventory slots are unique and present.");
     } else {
         println!(
             "WARNING: encrypted records were not decrypted; global uniqueness was not checked."
