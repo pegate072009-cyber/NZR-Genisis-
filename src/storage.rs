@@ -129,6 +129,48 @@ fn recover_publication(output_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+fn read_regular_file(path: &Path, max_bytes: Option<u64>) -> Result<Vec<u8>> {
+    let metadata = fs::symlink_metadata(path)
+        .with_context(|| format!("inspecting file {}", path.display()))?;
+
+    ensure!(
+        !metadata.file_type().is_symlink(),
+        "refusing to read a symbolic link: {}",
+        path.display()
+    );
+    ensure!(
+        metadata.is_file(),
+        "expected a regular file: {}",
+        path.display()
+    );
+
+    if let Some(limit) = max_bytes {
+        ensure!(
+            metadata.len() <= limit,
+            "file exceeds the allowed size of {limit} bytes: {}",
+            path.display()
+        );
+    }
+
+    fs::read(path).with_context(|| format!("reading file {}", path.display()))
+}
+
+fn validate_input_directory(input_dir: &Path) -> Result<()> {
+    let metadata = fs::symlink_metadata(input_dir)
+        .with_context(|| format!("inspecting inventory directory {}", input_dir.display()))?;
+
+    ensure!(
+        !metadata.file_type().is_symlink(),
+        "inventory directory must not be a symbolic link"
+    );
+    ensure!(
+        metadata.is_dir(),
+        "inventory path must be a directory"
+    );
+
+    Ok(())
+}
+
 fn validate_inventory_filename(name: &str, index: usize) -> Result<()> {
     let expected = format!("block.{:02}.enc", index + 1);
 
@@ -336,12 +378,25 @@ pub fn verify_supply(
     public_key_path: &Path,
     encryption_key_path: Option<&Path>,
 ) -> Result<()> {
-    let manifest_bytes = fs::read(input_dir.join("manifest.json"))?;
-    let signature_hex = fs::read_to_string(input_dir.join("manifest.sig"))?;
-    let signature = hex::decode(signature_hex.trim())?;
-    let public_key = read_key(public_key_path);
+    validate_input_directory(input_dir)?;
 
-    verify_signature(&public_key?, &manifest_bytes, &signature)?;
+    // Keep the signed manifest small enough to parse safely.
+    const MAX_MANIFEST_BYTES: u64 = 1_048_576;
+    const MAX_SIGNATURE_HEX_BYTES: u64 = 256;
+
+    let manifest_bytes = read_regular_file(
+        &input_dir.join("manifest.json"),
+        Some(MAX_MANIFEST_BYTES),
+    )?;
+    let signature_bytes = read_regular_file(
+        &input_dir.join("manifest.sig"),
+        Some(MAX_SIGNATURE_HEX_BYTES),
+    )?;
+    let signature_hex = std::str::from_utf8(&signature_bytes)?;
+    let signature = hex::decode(signature_hex.trim())?;
+    let public_key = read_key(public_key_path)?;
+
+    verify_signature(&public_key, &manifest_bytes, &signature)?;
 
     let manifest: Manifest = serde_json::from_slice(&manifest_bytes)?;
 
@@ -419,8 +474,8 @@ pub fn verify_supply(
         ensure!(entry.last_slot == expected_last, "incorrect slot range");
 
         let file_path = input_dir.join(&entry.file);
-        let encrypted_bytes =
-            fs::read(&file_path).with_context(|| format!("reading {}", entry.file))?;
+        let encrypted_bytes = read_regular_file(&file_path, None)
+            .with_context(|| format!("reading inventory file {}", entry.file))?;
         ensure!(
             sha256_hex(&encrypted_bytes) == entry.encrypted_sha256,
             "checksum mismatch in {}",
@@ -658,5 +713,46 @@ mod recovery_tests {
 
         assert!(GenerationLock::acquire(&output).is_err());
         assert_eq!(fs::read(&lock_path).unwrap(), b"existing lock");
+    }
+
+    #[test]
+    fn rejects_directory_when_regular_file_is_required() {
+        let temp = tempdir().unwrap();
+        let directory = temp.path().join("not-a-file");
+        fs::create_dir(&directory).unwrap();
+
+        assert!(read_regular_file(&directory, None).is_err());
+    }
+
+    #[test]
+    fn rejects_regular_file_over_size_limit() {
+        let temp = tempdir().unwrap();
+        let path = temp.path().join("large.txt");
+        fs::write(&path, b"12345").unwrap();
+
+        assert!(read_regular_file(&path, Some(4)).is_err());
+    }
+
+    #[test]
+    fn reads_regular_file_within_size_limit() {
+        let temp = tempdir().unwrap();
+        let path = temp.path().join("small.txt");
+        fs::write(&path, b"1234").unwrap();
+
+        assert_eq!(read_regular_file(&path, Some(4)).unwrap(), b"1234");
+    }
+
+    #[test]
+    fn rejects_symbolic_link_as_inventory_directory() {
+        let temp = tempdir().unwrap();
+        let actual = temp.path().join("actual");
+        let link = temp.path().join("link");
+        fs::create_dir(&actual).unwrap();
+
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&actual, &link).unwrap();
+            assert!(validate_input_directory(&link).is_err());
+        }
     }
 }
