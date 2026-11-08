@@ -630,4 +630,4 @@ mod recovery_tests {
         assert!(staging.join("new.txt").exists());
         assert!(backup.join("reserved.txt").exists());
     }
-}                        
+}
