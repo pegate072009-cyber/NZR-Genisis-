@@ -474,8 +474,8 @@ pub fn verify_supply(
         );
 
         if let Some(key) = encryption_key.as_ref() {
-            let plaintext = decrypt(key, &encrypted)
-                .with_context(|| format!("decrypting {}", entry.file))?;
+            let plaintext =
+                decrypt(key, &encrypted).with_context(|| format!("decrypting {}", entry.file))?;
 
             let text = std::str::from_utf8(&plaintext)
                 .with_context(|| format!("{} is not valid UTF-8", entry.file))?;
@@ -562,9 +562,7 @@ pub fn verify_supply(
             "not all inventory slots are present"
         );
 
-        println!(
-            "GLOBAL INTEGRITY: all coin numbers and inventory slots are unique and present."
-        );
+        println!("GLOBAL INTEGRITY: all coin numbers and inventory slots are unique and present.");
     } else {
         println!(
             "Manifest signature and encrypted file checksums are valid. \
