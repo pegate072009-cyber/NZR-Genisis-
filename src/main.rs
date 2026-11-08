@@ -167,3 +167,60 @@ fn main() -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn key_file_creation_writes_exact_bytes() {
+        let temp = tempdir().unwrap();
+        let path = temp.path().join("test.key");
+        let expected = [0x5Au8; 32];
+
+        create_new_key_file(&path, &expected, true).unwrap();
+
+        assert_eq!(fs::read(&path).unwrap(), expected);
+    }
+
+    #[test]
+    fn key_file_creation_refuses_to_overwrite_existing_file() {
+        let temp = tempdir().unwrap();
+        let path = temp.path().join("existing.key");
+        let original = b"existing key material";
+        fs::write(&path, original).unwrap();
+
+        assert!(create_new_key_file(&path, &[0x11u8; 32], true).is_err());
+        assert_eq!(fs::read(&path).unwrap(), original);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_key_file_is_created_with_restricted_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempdir().unwrap();
+        let path = temp.path().join("private.key");
+
+        create_new_key_file(&path, &[0x22u8; 32], true).unwrap();
+
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn public_key_file_is_created_with_public_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempdir().unwrap();
+        let path = temp.path().join("public.key");
+
+        create_new_key_file(&path, &[0x33u8; 32], false).unwrap();
+
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o644);
+    }
+}
