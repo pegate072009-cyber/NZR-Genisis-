@@ -1,6 +1,9 @@
 use crate::{
     coin::create_coin_record_with_seed,
     crypto::{decrypt, encrypt, read_key, sha256_hex, sign_bytes, verify_signature},
+    invenuse crate::{
+    coin::create_coin_record_with_seed,
+    crypto::{decrypt, encrypt, read_key, sha256_hex, sign_bytes, verify_signature},
     inventory::slot_for_coin,
     manifest::{FileEntry, Manifest},
     MAX_SUPPLY, NETWORK_NAME, TICKER,
@@ -449,6 +452,109 @@ pub fn verify_supply(
     println!("VALID: {total} {TICKER} inventory records.");
 
     Ok(())
+                } mut count = 0u64;
+            let mut previous_number = 0u64;
+
+            for line in text.lines() {
+                let mut parts = line.split_whitespace();
+
+                let number: u64 = parts
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("missing coin number"))?
+                    .parse()?;
+
+                let id = parts
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("missing coin identifier"))?;
+
+                ensure!(parts.next().is_none(), "unexpected extra field");
+
+                ensure!((1..=MAX_SUPPLY).contains(&number), "invalid coin number");
+
+                ensure!(
+                    number > previous_number,
+                    "duplicate or unordered coin number"
+                );
+
+                ensure!(
+                    id == create_coin_record_with_seed(&seed, number),
+                    "invalid coin identifier"
+                );
+
+                let slot = slot_for_coin(&seed, number, MAX_SUPPLY)?;
+
+                ensure!(
+                    (entry.first_slot..=entry.last_slot).contains(&slot),
+                    "coin stored in incorrect file"
+                );
+
+                let coin_bitmap = seen_coin_numbers
+                    .as_mut()
+                    .ok_or_else(|| anyhow::anyhow!("coin integrity bitmap unavailable"))?;
+
+                set_seen_bit(coin_bitmap, number - 1, "coin number")?;
+
+                let slot_bitmap = seen_slots
+                    .as_mut()
+                    .ok_or_else(|| anyhow::anyhow!("slot integrity bitmap unavailable"))?;
+
+                set_seen_bit(slot_bitmap, slot, "inventory slot")?;
+
+                previous_number = number;
+
+                count = count
+                    .checked_add(1)
+                    .ok_or_else(|| anyhow::anyhow!("record count overflow"))?;
+            }
+
+            ensure!(
+                count == entry.coin_records as u64,
+                "incorrect record count in {}",
+                entry.file
+            );
+        }
+
+        total = total
+            .checked_add(entry.coin_records as u64)
+            .ok_or_else(|| anyhow::anyhow!("inventory total overflow"))?;
+
+        expected_slot = entry
+            .last_slot
+            .checked_add(1)
+            .ok_or_else(|| anyhow::anyhow!("slot overflow"))?;
+    }
+
+    ensure!(
+        expected_slot == MAX_SUPPLY,
+        "inventory slot coverage is incomplete"
+    );
+
+    ensure!(
+        total == manifest.total_coin_records,
+        "manifest total does not match file totals"
+    );
+
+    if let (Some(coin_bitmap), Some(slot_bitmap)) = (seen_coin_numbers, seen_slots) {
+        ensure!(
+            bitmap_count(&coin_bitmap) == MAX_SUPPLY,
+            "inventory is missing one or more coin numbers"
+        );
+
+        ensure!(
+            bitmap_count(&slot_bitmap) == MAX_SUPPLY,
+            "inventory is missing one or more inventory slots"
+        );
+
+        println!("GLOBAL INTEGRITY: all coin numbers and inventory slots are unique and present.");
+    } else {
+        println!(
+            "WARNING: encrypted records were not decrypted; global uniqueness was not checked."
+        );
+    }
+
+    println!("VALID: {total} {TICKER} inventory records.");
+
+    Ok(())
                     }               .with_context(|| format!("decrypting {}", entry.file))?;
 
             let text = std::str::from_utf8(&plaintext)?;
@@ -683,7 +789,7 @@ pub fn verify_supply(
         );
     }
 
-    println!("VALID: {total} {TICKER} inventory records.");
+        println!("VALID: {total} {TICKER} inventory records.");
 
     Ok(())
-        }
+}
