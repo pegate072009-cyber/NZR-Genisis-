@@ -162,10 +162,7 @@ pub fn verify_supply(
         "incomplete inventory"
     );
 
-    ensure!(
-        !manifest.files.is_empty(),
-        "inventory contains no files"
-    );
+    ensure!(!manifest.files.is_empty(), "inventory contains no files");
 
     let first_file_capacity = manifest.files[0].coin_records as u64;
 
