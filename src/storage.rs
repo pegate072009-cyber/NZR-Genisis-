@@ -1,4 +1,5 @@
-use crate::{
+pppp
+    use crate::{
     coin::create_coin_record_with_seed,
     crypto::{decrypt, encrypt, read_key, sha256_hex, sign_bytes, verify_signature},
     inventory::slot_for_coin,
@@ -386,10 +387,11 @@ pub fn verify_supply(
     let signature_bytes = read_regular_file(
         &input_dir.join("manifest.sig"),
         Some(MAX_SIGNATURE_HEX_BYTES),
-    )?;    let signature_hex = std::str::from_utf8(&signature_bytes)?;
+    )?;
+
+    let signature_hex = std::str::from_utf8(&signature_bytes)?;
     let signature = hex::decode(signature_hex.trim())?;
     let public_key = read_key(public_key_path)?;
-
     verify_signature(&public_key, &manifest_bytes, &signature)?;
 
     let manifest: Manifest = serde_json::from_slice(&manifest_bytes)?;
@@ -475,9 +477,8 @@ pub fn verify_supply(
         );
 
         if let Some(key) = encryption_key.as_ref() {
-            let plaintext = decrypt(key, &encrypted)
-                .with_context(|| format!("decrypting {}", entry.file))?;
-
+            let plaintext =
+    decrypt(key, &encrypted).with_context(|| format!("decrypting {}", entry.file))?;
             let text = std::str::from_utf8(&plaintext)
                 .with_context(|| format!("{} is not valid UTF-8", entry.file))?;
 
@@ -563,9 +564,7 @@ pub fn verify_supply(
             "not all inventory slots are present"
         );
 
-        println!(
-            "GLOBAL INTEGRITY: all coin numbers and inventory slots are unique and present."
-        );
+        println!("GLOBAL INTEGRITY: all coin numbers and inventory slots are unique and present.");
     } else {
         println!(
             "Manifest signature and encrypted file checksums are valid. \
