@@ -410,9 +410,7 @@ pub fn verify_supply(
             "inventory is missing one or more inventory slots"
         );
 
-        println!(
-            "GLOBAL INTEGRITY: all coin numbers and inventory slots are unique and present."
-        );
+        println!("GLOBAL INTEGRITY: all coin numbers and inventory slots are unique and present.");
     } else {
         println!(
             "WARNING: encrypted records were not decrypted; global uniqueness was not checked."
@@ -422,4 +420,4 @@ pub fn verify_supply(
     println!("VALID: {total} {TICKER} inventory records.");
 
     Ok(())
-    }
+            }
