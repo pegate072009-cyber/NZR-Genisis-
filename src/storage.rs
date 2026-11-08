@@ -1,3 +1,4 @@
+
 use crate::{
     coin::create_coin_record_with_seed,
     crypto::{decrypt, encrypt, read_key, sha256_hex, sign_bytes, verify_signature},
@@ -245,7 +246,6 @@ pub fn verify_supply(
                     "duplicate or unordered coin number"
                 );
 
-                // Global duplicate detection across every inventory file.
                 let index = (number - 1) as usize;
                 let byte_index = index / 8;
                 let bit_mask = 1u8 << (index % 8);
@@ -302,9 +302,20 @@ pub fn verify_supply(
         "manifest total does not match file totals"
     );
 
-    println!("VALID: {total} {TICKER} inventory records.");
+    if let Some(seen) = seen_coin_numbers {
+        ensure!(
+            seen.iter().map(|byte| byte.count_ones() as u64).sum::<u64>() == MAX_SUPPLY,
+            "inventory is missing one or more coin numbers"
+        );
 
-    if decrypt_key.is_some() {
-                println!(
+        println!("GLOBAL INTEGRITY: all coin numbers are unique and present.");
+    } else {
+        println!(
             "WARNING: encrypted records were not decrypted; global uniqueness was not checked."
         );
+    }
+
+    println!("VALID: {total} {TICKER} inventory records.");
+
+    Ok(())
+}
