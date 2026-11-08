@@ -76,12 +76,7 @@ impl Chain {
             // The block's own timestamp is used as the validation clock.
             // This checks chain-internal timestamp rules without depending on
             // the machine's current wall clock.
-            replayed.accept_block(
-                block.clone(),
-                block.reward_coin_id,
-                params,
-                block.timestamp,
-            )?;
+            replayed.accept_block(block.clone(), block.reward_coin_id, params, block.timestamp)?;
         }
 
         ensure!(
