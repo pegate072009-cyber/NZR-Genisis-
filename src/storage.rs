@@ -335,10 +335,7 @@ pub fn verify_supply(
 
                 ensure!(parts.next().is_none(), "unexpected extra field");
 
-                ensure!(
-                    (1..=MAX_SUPPLY).contains(&number),
-                    "invalid coin number"
-                );
+                ensure!((1..=MAX_SUPPLY).contains(&number), "invalid coin number");
 
                 ensure!(
                     number > previous_number,
@@ -424,4 +421,4 @@ pub fn verify_supply(
     println!("VALID: {total} {TICKER} inventory records.");
 
     Ok(())
-        }
+                }
