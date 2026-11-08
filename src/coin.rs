@@ -101,3 +101,91 @@ pub fn validate_records_seeded(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TEST_SEED: [u8; 32] = [0x5Au8; 32];
+
+    #[test]
+    fn validates_generated_seeded_records() {
+        let records = generate_records_seeded(&TEST_SEED, 1, 5).unwrap();
+
+        assert!(validate_records_seeded(&records, &TEST_SEED, 1, 5).is_ok());
+    }
+
+    #[test]
+    fn rejects_missing_record() {
+        let records = generate_records_seeded(&TEST_SEED, 1, 5).unwrap();
+        let text = std::str::from_utf8(&records).unwrap();
+        let shortened = text.lines().take(4).collect::<Vec<_>>().join("\n");
+
+        assert!(validate_records_seeded(shortened.as_bytes(), &TEST_SEED, 1, 5).is_err());
+    }
+
+    #[test]
+    fn rejects_duplicate_coin_identifier() {
+        let first_id = create_coin_record_with_seed(&TEST_SEED, 1);
+        let records = format!("1 {first_id}\n2 {first_id}\n");
+
+        assert!(validate_records_seeded(records.as_bytes(), &TEST_SEED, 1, 2).is_err());
+    }
+
+    #[test]
+    fn rejects_out_of_order_coin_numbers() {
+        let first_id = create_coin_record_with_seed(&TEST_SEED, 1);
+        let third_id = create_coin_record_with_seed(&TEST_SEED, 3);
+        let records = format!("1 {first_id}\n3 {third_id}\n");
+
+        assert!(validate_records_seeded(records.as_bytes(), &TEST_SEED, 1, 2).is_err());
+    }
+
+    #[test]
+    fn rejects_coin_identifier_from_wrong_number() {
+        let wrong_id = create_coin_record_with_seed(&TEST_SEED, 2);
+        let records = format!("1 {wrong_id}\n");
+
+        assert!(validate_records_seeded(records.as_bytes(), &TEST_SEED, 1, 1).is_err());
+    }
+
+    #[test]
+    fn rejects_identifier_with_invalid_length_or_characters() {
+        let short_id = "abcd";
+        let records = format!("1 {short_id}\n");
+
+        assert!(validate_records_seeded(records.as_bytes(), &TEST_SEED, 1, 1).is_err());
+
+        let invalid_id = format!("{}g", "a".repeat(63));
+        let records = format!("1 {invalid_id}\n");
+
+        assert!(validate_records_seeded(records.as_bytes(), &TEST_SEED, 1, 1).is_err());
+    }
+
+    #[test]
+    fn rejects_extra_record_fields() {
+        let id = create_coin_record_with_seed(&TEST_SEED, 1);
+        let records = format!("1 {id} unexpected\n");
+
+        assert!(validate_records_seeded(records.as_bytes(), &TEST_SEED, 1, 1).is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_utf8() {
+        assert!(validate_records_seeded(&[0xFF, 0xFE], &TEST_SEED, 1, 1).is_err());
+    }
+
+    #[test]
+    fn rejects_zero_start_number() {
+        assert!(generate_records_seeded(&TEST_SEED, 0, 1).is_err());
+        assert!(validate_records_seeded(b"", &TEST_SEED, 0, 0).is_err());
+    }
+
+    #[test]
+    fn generated_identifiers_are_seed_specific() {
+        let first = create_coin_record_with_seed(&[1u8; 32], 1);
+        let second = create_coin_record_with_seed(&[2u8; 32], 1);
+
+        assert_ne!(first, second);
+    }
+}
