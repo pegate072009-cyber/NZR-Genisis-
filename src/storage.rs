@@ -180,6 +180,11 @@ pub fn verify_supply(
 
     let decrypt_key = encryption_key_path.map(read_key).transpose()?;
 
+    // One bit per coin number: approximately 3.75 MB for 30 million coins.
+    let mut seen_coin_numbers = decrypt_key
+        .as_ref()
+        .map(|_| vec![0u8; ((MAX_SUPPLY + 7) / 8) as usize]);
+
     let mut total = 0u64;
     let mut expected_slot = 0u64;
 
@@ -240,6 +245,22 @@ pub fn verify_supply(
                     "duplicate or unordered coin number"
                 );
 
+                // Global duplicate detection across every inventory file.
+                let index = (number - 1) as usize;
+                let byte_index = index / 8;
+                let bit_mask = 1u8 << (index % 8);
+
+                let seen = seen_coin_numbers
+                    .as_mut()
+                    .ok_or_else(|| anyhow::anyhow!("integrity bitmap unavailable"))?;
+
+                ensure!(
+                    seen[byte_index] & bit_mask == 0,
+                    "duplicate coin number found across inventory files: {number}"
+                );
+
+                seen[byte_index] |= bit_mask;
+
                 ensure!(
                     id == create_coin_record_with_seed(&seed, number),
                     "invalid coin identifier"
@@ -283,5 +304,11 @@ pub fn verify_supply(
 
     println!("VALID: {total} {TICKER} inventory records.");
 
+    if decrypt_key.is_some() {
+        println!("GLOBAL INTEGRITY: all coin numbers are unique.");
+    } else {
+        println!("WARNING: encrypted records were not decrypted; global uniqueness was not checked.");
+    }
+
     Ok(())
-}
+                    }
