@@ -32,12 +32,7 @@ fn domain_parameters(supply: u64) -> Result<DomainParameters> {
     })
 }
 
-fn round_function(
-    seed: &[u8; 32],
-    round: u8,
-    value: u64,
-    mask: u64,
-) -> u64 {
+fn round_function(seed: &[u8; 32], round: u8, value: u64, mask: u64) -> u64 {
     let mut hasher = Sha256::new();
 
     hasher.update(DOMAIN_TAG);
@@ -54,11 +49,7 @@ fn round_function(
     ) & mask
 }
 
-fn permute_domain(
-    seed: &[u8; 32],
-    value: u64,
-    parameters: DomainParameters,
-) -> u64 {
+fn permute_domain(seed: &[u8; 32], value: u64, parameters: DomainParameters) -> u64 {
     let mut left = (value >> parameters.half_bits) & parameters.half_mask;
     let mut right = value & parameters.half_mask;
 
@@ -83,14 +74,8 @@ fn slot_with_parameters(
     ensure!(coin_number > 0, "coin number must be positive");
     ensure!(coin_number <= supply, "coin number exceeds supply");
 
-    let mut position = permute_domain(
-        seed,
-        coin_number - 1,
-        parameters,
-    );
+    let mut position = permute_domain(seed, coin_number - 1, parameters);
 
-    // Cycle walking restricts the full-domain permutation
-    // to the requested supply range.
     while position >= supply {
         position = permute_domain(seed, position, parameters);
     }
@@ -98,19 +83,10 @@ fn slot_with_parameters(
     Ok(position)
 }
 
-pub fn slot_for_coin(
-    seed: &[u8; 32],
-    coin_number: u64,
-    supply: u64,
-) -> Result<u64> {
+pub fn slot_for_coin(seed: &[u8; 32], coin_number: u64, supply: u64) -> Result<u64> {
     let parameters = domain_parameters(supply)?;
 
-    slot_with_parameters(
-        seed,
-        coin_number,
-        supply,
-        parameters,
-    )
+    slot_with_parameters(seed, coin_number, supply, parameters)
 }
 
 pub fn slots_for_range(
@@ -128,7 +104,6 @@ pub fn slots_for_range(
 
     ensure!(last <= supply, "range exceeds supply");
 
-    // Calculate domain parameters only once for the batch.
     let parameters = domain_parameters(supply)?;
 
     let mut slots = Vec::new();
@@ -177,8 +152,7 @@ mod tests {
         let seed = [7u8; 32];
         let supply = 100_000;
 
-        let positions =
-            slots_for_range(&seed, 1, supply as u32, supply).unwrap();
+        let positions = slots_for_range(&seed, 1, supply as u32, supply).unwrap();
 
         let unique: HashSet<u64> = positions.iter().copied().collect();
 
@@ -214,8 +188,7 @@ mod tests {
         let seed = [11u8; 32];
 
         for supply in [1u64, 2, 3, 4, 7, 8, 15, 16, 31, 32, 100] {
-            let slots =
-                slots_for_range(&seed, 1, supply as u32, supply).unwrap();
+            let slots = slots_for_range(&seed, 1, supply as u32, supply).unwrap();
 
             let unique: HashSet<u64> = slots.iter().copied().collect();
 
@@ -228,18 +201,12 @@ mod tests {
 
     #[test]
     fn supports_multiple_seeds() {
-        let seeds = [
-            [0u8; 32],
-            [1u8; 32],
-            [7u8; 32],
-            [255u8; 32],
-        ];
+        let seeds = [[0u8; 32], [1u8; 32], [7u8; 32], [255u8; 32]];
 
         let supply = 2_000u64;
 
         for seed in seeds {
-            let slots =
-                slots_for_range(&seed, 1, supply as u32, supply).unwrap();
+            let slots = slots_for_range(&seed, 1, supply as u32, supply).unwrap();
 
             let unique: HashSet<u64> = slots.iter().copied().collect();
 
@@ -262,7 +229,15 @@ mod tests {
         let seed = [19u8; 32];
         let supply = 30_000_000u64;
 
-        for number in [1, 2, 100, 1_000_000, 15_000_000, 29_999_999, 30_000_000] {
+        for number in [
+            1,
+            2,
+            100,
+            1_000_000,
+            15_000_000,
+            29_999_999,
+            30_000_000,
+        ] {
             let slot = slot_for_coin(&seed, number, supply).unwrap();
             assert!(slot < supply);
         }
@@ -274,4 +249,4 @@ mod tests {
 
         assert!(slot_for_coin(&seed, 1, 67_108_865).is_err());
     }
-                }
+}
