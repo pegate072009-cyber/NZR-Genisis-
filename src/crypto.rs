@@ -6,10 +6,7 @@ use anyhow::{anyhow, ensure, Context, Result};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use rand::{rngs::OsRng, RngCore};
 use sha2::{Digest, Sha256};
-use std::{
-    fs,
-    path::Path,
-};
+use std::{fs, path::Path};
 
 pub fn sha256_hex(data: &[u8]) -> String {
     hex::encode(Sha256::digest(data))
@@ -18,16 +15,24 @@ pub fn sha256_hex(data: &[u8]) -> String {
 /// Reads a 32-byte key only from a regular, non-symlink file.
 /// On Unix, private key files must not grant group/other permissions.
 pub fn read_key(path: &Path) -> Result<[u8; 32]> {
-    let metadata = fs::symlink_metadata(path)
-        .with_context(|| format!("inspecting key {}", path.display()))?;
+    let metadata =
+        fs::symlink_metadata(path).with_context(|| format!("inspecting key {}", path.display()))?;
 
     ensure!(
         !metadata.file_type().is_symlink(),
         "refusing to read a symbolic-link key: {}",
         path.display()
     );
-    ensure!(metadata.is_file(), "key path is not a regular file: {}", path.display());
-    ensure!(metadata.len() == 32, "key {} must be exactly 32 bytes", path.display());
+    ensure!(
+        metadata.is_file(),
+        "key path is not a regular file: {}",
+        path.display()
+    );
+    ensure!(
+        metadata.len() == 32,
+        "key {} must be exactly 32 bytes",
+        path.display()
+    );
 
     #[cfg(unix)]
     {
