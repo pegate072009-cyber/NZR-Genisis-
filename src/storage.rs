@@ -530,3 +530,102 @@ pub fn verify_supply(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn restores_backup_when_output_is_missing() {
+        let temp = tempdir().unwrap();
+        let output = temp.path().join("inventory");
+        let backup = sibling_path(&output, ".backup").unwrap();
+        let staging = sibling_path(&output, ".staging").unwrap();
+
+        fs::create_dir(&backup).unwrap();
+        fs::write(backup.join("previous.txt"), b"previous inventory").unwrap();
+
+        fs::create_dir(&staging).unwrap();
+        fs::write(staging.join("incomplete.txt"), b"incomplete").unwrap();
+
+        recover_publication(&output).unwrap();
+
+        assert!(output.join("previous.txt").exists());
+        assert!(!backup.exists());
+        assert!(!staging.exists());
+    }
+
+    #[test]
+    fn removes_backup_when_output_already_exists() {
+        let temp = tempdir().unwrap();
+        let output = temp.path().join("inventory");
+        let backup = sibling_path(&output, ".backup").unwrap();
+
+        fs::create_dir(&output).unwrap();
+        fs::write(output.join("current.txt"), b"current inventory").unwrap();
+
+        fs::create_dir(&backup).unwrap();
+        fs::write(backup.join("old.txt"), b"old inventory").unwrap();
+
+        recover_publication(&output).unwrap();
+
+        assert!(output.join("current.txt").exists());
+        assert!(!backup.exists());
+    }
+
+    #[test]
+    fn removes_incomplete_staging_directory() {
+        let temp = tempdir().unwrap();
+        let output = temp.path().join("inventory");
+        let staging = sibling_path(&output, ".staging").unwrap();
+
+        fs::create_dir(&staging).unwrap();
+        fs::write(staging.join("partial.txt"), b"partial data").unwrap();
+
+        recover_publication(&output).unwrap();
+
+        assert!(!staging.exists());
+        assert!(!output.exists());
+    }
+
+    #[test]
+    fn preserves_existing_output_when_no_backup_exists() {
+        let temp = tempdir().unwrap();
+        let output = temp.path().join("inventory");
+
+        fs::create_dir(&output).unwrap();
+        fs::write(output.join("valid.txt"), b"valid inventory").unwrap();
+
+        recover_publication(&output).unwrap();
+
+        assert!(output.join("valid.txt").exists());
+    }
+
+    #[test]
+    fn failed_publication_does_not_delete_existing_output() {
+        let temp = tempdir().unwrap();
+        let output = temp.path().join("inventory");
+        let staging = sibling_path(&output, ".staging").unwrap();
+        let backup = sibling_path(&output, ".backup").unwrap();
+
+        fs::create_dir(&output).unwrap();
+        fs::write(output.join("valid.txt"), b"previous inventory").unwrap();
+
+        fs::create_dir(&staging).unwrap();
+        fs::write(staging.join("new.txt"), b"new inventory").unwrap();
+
+        // Occupy the backup path so the first rename cannot succeed.
+        fs::create_dir(&backup).unwrap();
+        fs::write(backup.join("reserved.txt"), b"reserved").unwrap();
+
+        let result = publish_staging(&output, &staging, &backup);
+
+        assert!(result.is_err());
+        assert!(output.join("valid.txt").exists());
+        assert!(staging.join("new.txt").exists());
+        assert!(backup.join("reserved.txt").exists());
+    }
+}
+
