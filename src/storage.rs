@@ -580,6 +580,100 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    fn create_signed_test_inventory(root: &Path) -> (PathBuf, PathBuf) {
+        let inventory_dir = root.join("inventory");
+        fs::create_dir(&inventory_dir).unwrap();
+
+        let signing_key = SigningKey::from_bytes(&[0x42u8; 32]);
+        let public_key_path = root.join("public.key");
+        fs::write(&public_key_path, signing_key.verifying_key().to_bytes()).unwrap();
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&public_key_path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+
+        let encrypted_bytes = b"test encrypted inventory payload";
+        fs::write(inventory_dir.join("block.01.enc"), encrypted_bytes).unwrap();
+
+        let manifest = Manifest {
+            network: NETWORK_NAME.into(),
+            ticker: TICKER.into(),
+            format_version: INVENTORY_FORMAT_VERSION,
+            total_coin_records: MAX_SUPPLY,
+            inventory_domain_supply: MAX_SUPPLY,
+            inventory_seed: hex::encode([0x24u8; 32]),
+            files: vec![FileEntry {
+                file: "block.01.enc".into(),
+                first_slot: 0,
+                last_slot: MAX_SUPPLY - 1,
+                coin_records: MAX_SUPPLY as u32,
+                encrypted_sha256: sha256_hex(encrypted_bytes),
+                encryption: INVENTORY_ENCRYPTION.into(),
+            }],
+        };
+
+        let manifest_bytes = serde_json::to_vec_pretty(&manifest).unwrap();
+        let signature = sign_bytes(&signing_key, &manifest_bytes);
+
+        fs::write(inventory_dir.join("manifest.json"), manifest_bytes).unwrap();
+        fs::write(
+            inventory_dir.join("manifest.sig"),
+            hex::encode(signature),
+        )
+        .unwrap();
+
+        (inventory_dir, public_key_path)
+    }
+
+    #[test]
+    fn verifies_signed_manifest_and_inventory_checksum() {
+        let temp = tempdir().unwrap();
+        let (inventory_dir, public_key_path) = create_signed_test_inventory(temp.path());
+
+        assert!(verify_supply(&inventory_dir, &public_key_path, None).is_ok());
+    }
+
+    #[test]
+    fn rejects_modified_encrypted_inventory_file() {
+        let temp = tempdir().unwrap();
+        let (inventory_dir, public_key_path) = create_signed_test_inventory(temp.path());
+        fs::write(inventory_dir.join("block.01.enc"), b"tampered payload").unwrap();
+
+        assert!(verify_supply(&inventory_dir, &public_key_path, None).is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_manifest_signature() {
+        let temp = tempdir().unwrap();
+        let (inventory_dir, public_key_path) = create_signed_test_inventory(temp.path());
+        fs::write(inventory_dir.join("manifest.sig"), hex::encode([0u8; 64])).unwrap();
+
+        assert!(verify_supply(&inventory_dir, &public_key_path, None).is_err());
+    }
+
+    #[test]
+    fn rejects_modified_manifest_after_signing() {
+        let temp = tempdir().unwrap();
+        let (inventory_dir, public_key_path) = create_signed_test_inventory(temp.path());
+        let manifest_path = inventory_dir.join("manifest.json");
+        let mut manifest = fs::read(&manifest_path).unwrap();
+        manifest[0] ^= 1;
+        fs::write(manifest_path, manifest).unwrap();
+
+        assert!(verify_supply(&inventory_dir, &public_key_path, None).is_err());
+    }
+
+    #[test]
+    fn rejects_missing_inventory_file() {
+        let temp = tempdir().unwrap();
+        let (inventory_dir, public_key_path) = create_signed_test_inventory(temp.path());
+        fs::remove_file(inventory_dir.join("block.01.enc")).unwrap();
+
+        assert!(verify_supply(&inventory_dir, &public_key_path, None).is_err());
+    }
+
     #[test]
     fn generation_lock_prevents_second_writer() {
         let temp = tempdir().unwrap();
