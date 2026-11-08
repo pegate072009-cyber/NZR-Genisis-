@@ -1,3 +1,4 @@
+
 use crate::{
     coin::create_coin_record_with_seed,
     crypto::{decrypt, encrypt, read_key, sha256_hex, sign_bytes, verify_signature},
@@ -17,6 +18,73 @@ use std::{
 
 const INVENTORY_FORMAT_VERSION: u32 = 2;
 const INVENTORY_ENCRYPTION: &str = "AES-256-GCM";
+
+fn sibling_path(output_dir: &Path, suffix: &str) -> Result<PathBuf> {
+    let name = output_dir
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("output directory must have a final path component"))?;
+
+    let mut backup_name = name.to_os_string();
+    backup_name.push(suffix);
+
+    let parent = output_dir
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+
+    Ok(parent.join(backup_name))
+}
+
+fn path_exists(path: &Path) -> Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            ensure!(
+                !metadata.file_type().is_symlink(),
+                "refusing to manage a symbolic link: {}",
+                path.display()
+            );
+            Ok(true)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn remove_managed_directory(path: &Path) -> Result<()> {
+    if !path_exists(path)? {
+        return Ok(());
+    }
+
+    ensure!(
+        fs::symlink_metadata(path)?.is_dir(),
+        "managed path is not a directory: {}",
+        path.display()
+    );
+
+    fs::remove_dir_all(path)
+        .with_context(|| format!("removing managed directory {}", path.display()))
+}
+
+fn recover_publication(output_dir: &Path) -> Result<()> {
+    let staging = sibling_path(output_dir, ".staging")?;
+    let backup = sibling_path(output_dir, ".backup")?;
+
+    let output_exists = path_exists(output_dir)?;
+    let backup_exists = path_exists(&backup)?;
+
+    if !output_exists && backup_exists {
+        fs::rename(&backup, output_dir)
+            .context("restoring previous Nezora inventory backup")?;
+    } else if output_exists && backup_exists {
+        // The new directory was published. Its backup is no longer needed.
+        remove_managed_directory(&backup)?;
+    }
+
+    // An unpublished staging directory is never authoritative.
+    remove_managed_directory(&staging)?;
+
+    Ok(())
+}
 
 fn validate_inventory_filename(name: &str, index: usize) -> Result<()> {
     let expected = format!("block.{:02}.enc", index + 1);
@@ -59,6 +127,39 @@ fn bitmap_count(bitmap: &[u8]) -> u64 {
     bitmap.iter().map(|byte| byte.count_ones() as u64).sum()
 }
 
+fn publish_staging(output_dir: &Path, staging: &Path, backup: &Path) -> Result<()> {
+    let output_exists = path_exists(output_dir)?;
+
+    if output_exists {
+        ensure!(
+            fs::symlink_metadata(output_dir)?.is_dir(),
+            "output path must be a directory"
+        );
+
+        fs::rename(output_dir, backup)
+            .context("moving previous inventory into backup")?;
+    }
+
+    if let Err(error) = fs::rename(staging, output_dir) {
+        if output_exists {
+            if let Err(restore_error) = fs::rename(backup, output_dir) {
+                return Err(anyhow::anyhow!(
+                    "publishing new inventory failed: {error}; restoring backup also failed: {restore_error}"
+                ));
+            }
+        }
+
+        return Err(error).context("publishing staged inventory");
+    }
+
+    if output_exists {
+        remove_managed_directory(backup)
+            .context("new inventory published, but backup cleanup failed")?;
+    }
+
+    Ok(())
+}
+
 pub fn generate_supply(
     output_dir: &Path,
     files: u32,
@@ -79,23 +180,32 @@ pub fn generate_supply(
     let signing_bytes = read_key(signing_key_path)?;
     let signing_key = SigningKey::from_bytes(&signing_bytes);
 
-    let mut seed = [0u8; 32];
-    OsRng.fill_bytes(&mut seed);
+    let parent = output_dir
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
 
-    fs::create_dir_all(output_dir)?;
+    fs::create_dir_all(parent)?;
 
-    let mut random_name = [0u8; 16];
-    OsRng.fill_bytes(&mut random_name);
+    let staging = sibling_path(output_dir, ".staging")?;
+    let backup = sibling_path(output_dir, ".backup")?;
 
-    let temp_dir = output_dir.join(format!(".nezora-temp-{}", hex::encode(random_name)));
+    recover_publication(output_dir)?;
+    remove_managed_directory(&staging)?;
 
-    fs::create_dir(&temp_dir)?;
+    fs::create_dir(&staging)?;
 
-    let generation_result = (|| -> Result<Vec<FileEntry>> {
+    let generation_result = (|| -> Result<()> {
+        let mut seed = [0u8; 32];
+        OsRng.fill_bytes(&mut seed);
+
+        let plaintext_dir = staging.join(".plaintext");
+        fs::create_dir(&plaintext_dir)?;
+
         let mut writers = Vec::with_capacity(files as usize);
 
         for index in 0..files {
-            let path = temp_dir.join(format!("inventory.{index:02}.tmp"));
+            let path = plaintext_dir.join(format!("inventory.{index:02}.tmp"));
             writers.push(BufWriter::new(File::create(path)?));
         }
 
@@ -120,7 +230,6 @@ pub fn generate_supply(
         drop(writers);
 
         let mut entries = Vec::with_capacity(files as usize);
-        let mut created_files: Vec<PathBuf> = Vec::new();
 
         for index in 0..files {
             let first_slot = (index as u64)
@@ -131,23 +240,18 @@ pub fn generate_supply(
                 .checked_add(coins_per_file as u64 - 1)
                 .ok_or_else(|| anyhow::anyhow!("slot calculation overflow"))?;
 
-            let temp_path = temp_dir.join(format!("inventory.{index:02}.tmp"));
+            let plaintext_path =
+                plaintext_dir.join(format!("inventory.{index:02}.tmp"));
 
-            let plaintext = fs::read(&temp_path)?;
+            let plaintext = fs::read(&plaintext_path)?;
             let encrypted = encrypt(&encryption_key, &plaintext)?;
 
             let filename = format!("block.{:02}.enc", index + 1);
-            let final_path = output_dir.join(&filename);
+            let final_path = staging.join(&filename);
 
-            if let Err(error) = fs::write(&final_path, &encrypted) {
-                for path in &created_files {
-                    let _ = fs::remove_file(path);
-                }
-
-                return Err(error).with_context(|| format!("writing {filename}"));
-            }
-
-            created_files.push(final_path);
+            let mut file = File::create(&final_path)?;
+            file.write_all(&encrypted)?;
+            file.sync_all()?;
 
             entries.push(FileEntry {
                 file: filename,
@@ -159,36 +263,45 @@ pub fn generate_supply(
             });
         }
 
-        Ok(entries)
+        remove_managed_directory(&plaintext_dir)?;
+
+        let manifest = Manifest {
+            network: NETWORK_NAME.into(),
+            ticker: TICKER.into(),
+            format_version: INVENTORY_FORMAT_VERSION,
+            total_coin_records: total,
+            inventory_domain_supply: MAX_SUPPLY,
+            inventory_seed: hex::encode(seed),
+            files: entries,
+        };
+
+        let manifest_bytes = serde_json::to_vec_pretty(&manifest)?;
+        let signature = sign_bytes(&signing_key, &manifest_bytes);
+
+        let mut manifest_file = File::create(staging.join("manifest.json"))?;
+        manifest_file.write_all(&manifest_bytes)?;
+        manifest_file.sync_all()?;
+
+        let mut signature_file = File::create(staging.join("manifest.sig"))?;
+        signature_file.write_all(hex::encode(signature).as_bytes())?;
+        signature_file.sync_all()?;
+
+        Ok(())
     })();
 
-    let cleanup_result = fs::remove_dir_all(&temp_dir);
+    if let Err(error) = generation_result {
+        let cleanup = remove_managed_directory(&staging);
 
-    let entries = match generation_result {
-        Ok(entries) => entries,
-        Err(error) => {
-            let _ = cleanup_result;
-            return Err(error);
+        if let Err(cleanup_error) = cleanup {
+            return Err(anyhow::anyhow!(
+                "generation failed: {error}; staging cleanup failed: {cleanup_error}"
+            ));
         }
-    };
 
-    cleanup_result?;
+        return Err(error);
+    }
 
-    let manifest = Manifest {
-        network: NETWORK_NAME.into(),
-        ticker: TICKER.into(),
-        format_version: INVENTORY_FORMAT_VERSION,
-        total_coin_records: total,
-        inventory_domain_supply: MAX_SUPPLY,
-        inventory_seed: hex::encode(seed),
-        files: entries,
-    };
-
-    let manifest_bytes = serde_json::to_vec_pretty(&manifest)?;
-    let signature = sign_bytes(&signing_key, &manifest_bytes);
-
-    fs::write(output_dir.join("manifest.json"), &manifest_bytes)?;
-    fs::write(output_dir.join("manifest.sig"), hex::encode(signature))?;
+    publish_staging(output_dir, &staging, &backup)?;
 
     println!("Generated {total} experimental {TICKER} records.");
 
@@ -201,7 +314,6 @@ pub fn verify_supply(
     encryption_key_path: Option<&Path>,
 ) -> Result<()> {
     let manifest_bytes = fs::read(input_dir.join("manifest.json"))?;
-
     let signature_hex = fs::read_to_string(input_dir.join("manifest.sig"))?;
 
     let signature = hex::decode(signature_hex.trim())?;
@@ -300,8 +412,7 @@ pub fn verify_supply(
 
         ensure!(entry.last_slot == expected_last, "incorrect slot range");
 
-        let file_path: PathBuf = input_dir.join(&entry.file);
-
+        let file_path = input_dir.join(&entry.file);
         let encrypted_bytes =
             fs::read(&file_path).with_context(|| format!("reading {}", entry.file))?;
 
@@ -333,7 +444,6 @@ pub fn verify_supply(
                     .ok_or_else(|| anyhow::anyhow!("missing coin identifier"))?;
 
                 ensure!(parts.next().is_none(), "unexpected extra field");
-
                 ensure!((1..=MAX_SUPPLY).contains(&number), "invalid coin number");
 
                 ensure!(
@@ -353,20 +463,23 @@ pub fn verify_supply(
                     "coin stored in incorrect file"
                 );
 
-                let coin_bitmap = seen_coin_numbers
-                    .as_mut()
-                    .ok_or_else(|| anyhow::anyhow!("coin integrity bitmap unavailable"))?;
+                set_seen_bit(
+                    seen_coin_numbers
+                        .as_mut()
+                        .ok_or_else(|| anyhow::anyhow!("coin bitmap unavailable"))?,
+                    number - 1,
+                    "coin number",
+                )?;
 
-                set_seen_bit(coin_bitmap, number - 1, "coin number")?;
-
-                let slot_bitmap = seen_slots
-                    .as_mut()
-                    .ok_or_else(|| anyhow::anyhow!("slot integrity bitmap unavailable"))?;
-
-                set_seen_bit(slot_bitmap, slot, "inventory slot")?;
+                set_seen_bit(
+                    seen_slots
+                        .as_mut()
+                        .ok_or_else(|| anyhow::anyhow!("slot bitmap unavailable"))?,
+                    slot,
+                    "inventory slot",
+                )?;
 
                 previous_number = number;
-
                 count = count
                     .checked_add(1)
                     .ok_or_else(|| anyhow::anyhow!("record count overflow"))?;
@@ -410,7 +523,9 @@ pub fn verify_supply(
             "inventory is missing one or more inventory slots"
         );
 
-        println!("GLOBAL INTEGRITY: all coin numbers and inventory slots are unique and present.");
+        println!(
+            "GLOBAL INTEGRITY: all coin numbers and inventory slots are unique and present."
+        );
     } else {
         println!(
             "WARNING: encrypted records were not decrypted; global uniqueness was not checked."
@@ -420,4 +535,4 @@ pub fn verify_supply(
     println!("VALID: {total} {TICKER} inventory records.");
 
     Ok(())
-}
+}     
