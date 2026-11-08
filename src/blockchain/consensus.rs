@@ -17,7 +17,8 @@ pub struct ConsensusParams {
 impl Default for ConsensusParams {
     fn default() -> Self {
         Self {
-            protocol_version: 1,
+            // V2 activates the unambiguous Merkle commitment.
+            protocol_version: 2,
             max_supply: 30_000_000,
             block_reward: 1,
             target_block_time_secs: 600,
@@ -31,6 +32,7 @@ impl Default for ConsensusParams {
 
 impl ConsensusParams {
     pub fn validate(&self) -> Result<()> {
+        ensure!(self.protocol_version > 0, "protocol version must be positive");
         ensure!(self.max_supply > 0, "maximum supply must be positive");
         ensure!(self.block_reward == 1, "Nezora block reward must be 1 NZR");
         ensure!(
@@ -40,6 +42,10 @@ impl ConsensusParams {
         ensure!(
             self.retarget_interval >= 2,
             "retarget interval must be at least 2"
+        );
+        ensure!(
+            self.initial_difficulty_bits > 0,
+            "initial difficulty must require at least one leading zero bit"
         );
         ensure!(
             self.initial_difficulty_bits <= self.max_difficulty_bits,
@@ -82,14 +88,13 @@ pub fn expected_difficulty_bits(
         return Ok(previous_bits);
     }
 
+    // A retarget window of N blocks contains N-1 timestamp intervals.
     let period_len = params.retarget_interval - 1;
-
     let target_span = period_len
         .checked_mul(params.target_block_time_secs)
         .ok_or_else(|| anyhow::anyhow!("retarget target span overflow"))?;
 
     let first_index = chain.blocks.len() - params.retarget_interval as usize;
-
     let first_time = chain.blocks[first_index].timestamp;
     let last_time = chain
         .blocks
@@ -113,5 +118,76 @@ pub fn expected_difficulty_bits(
         previous_bits
     };
 
-    Ok(adjusted.min(params.max_difficulty_bits))
+    // Never allow retargeting to reduce work below the configured baseline.
+    Ok(adjusted
+        .max(params.initial_difficulty_bits)
+        .min(params.max_difficulty_bits))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::blockchain::{block::Block, state::LedgerState};
+
+    fn test_block(timestamp: u64, difficulty_bits: u16) -> Block {
+        Block {
+            version: 2,
+            height: 1,
+            previous_hash: [0; 32],
+            timestamp,
+            reward_coin_number: 1,
+            reward_coin_id: [1; 32],
+            miner_address: [2; 32],
+            transactions: Vec::new(),
+            transaction_root: [0; 32],
+            nonce: 0,
+            difficulty_bits,
+        }
+    }
+
+    #[test]
+    fn rejects_zero_initial_difficulty() {
+        let mut params = ConsensusParams::default();
+        params.initial_difficulty_bits = 0;
+        assert!(params.validate().is_err());
+    }
+
+    #[test]
+    fn first_block_uses_configured_difficulty() {
+        let chain = Chain {
+            blocks: Vec::new(),
+            state: LedgerState::default(),
+        };
+        let params = ConsensusParams::default();
+
+        assert_eq!(
+            expected_difficulty_bits(&chain, 1, &params).unwrap(),
+            params.initial_difficulty_bits
+        );
+    }
+
+    #[test]
+    fn slow_retarget_cannot_reduce_below_baseline() {
+        let params = ConsensusParams {
+            retarget_interval: 2,
+            target_block_time_secs: 10,
+            ..ConsensusParams::default()
+        };
+        let chain = Chain {
+            blocks: vec![test_block(1, 12), test_block(1_000, 12)],
+            state: LedgerState::default(),
+        };
+
+        assert_eq!(expected_difficulty_bits(&chain, 3, &params).unwrap(), 12);
+    }
+
+    #[test]
+    fn rejects_wrong_next_height() {
+        let chain = Chain {
+            blocks: vec![test_block(1, 12)],
+            state: LedgerState::default(),
+        };
+
+        assert!(expected_difficulty_bits(&chain, 9, &ConsensusParams::default()).is_err());
+    }
 }
