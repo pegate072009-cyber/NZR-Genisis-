@@ -476,9 +476,11 @@ pub fn verify_supply(
         );
 
         if let Some(key) = encryption_key.as_ref() {
-            let plaintext =
-    decrypt(key, &encrypted).with_context(|| format!("decrypting {}", entry.file))?;
-            let text = std::str::from_utf8(&plaintext)
+    let plaintext =
+        decrypt(key, &encrypted).with_context(|| format!("decrypting {}", entry.file))?;
+
+    let text = std::str::from_utf8(&plaintext)
+        .with_context(|| format!("{} is not valid UTF-8", entry.file))?;  let text = std::str::from_utf8(&plaintext)
                 .with_context(|| format!("{} is not valid UTF-8", entry.file))?;
 
             let mut file_records = 0u64;
