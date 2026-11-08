@@ -1,4 +1,3 @@
-
 use crate::{
     coin::create_coin_record_with_seed,
     crypto::{decrypt, encrypt, read_key, sha256_hex, sign_bytes, verify_signature},
@@ -73,8 +72,7 @@ fn recover_publication(output_dir: &Path) -> Result<()> {
     let backup_exists = path_exists(&backup)?;
 
     if !output_exists && backup_exists {
-        fs::rename(&backup, output_dir)
-            .context("restoring previous Nezora inventory backup")?;
+        fs::rename(&backup, output_dir).context("restoring previous Nezora inventory backup")?;
     } else if output_exists && backup_exists {
         // The new directory was published. Its backup is no longer needed.
         remove_managed_directory(&backup)?;
@@ -240,8 +238,7 @@ pub fn generate_supply(
                 .checked_add(coins_per_file as u64 - 1)
                 .ok_or_else(|| anyhow::anyhow!("slot calculation overflow"))?;
 
-            let plaintext_path =
-                plaintext_dir.join(format!("inventory.{index:02}.tmp"));
+            let plaintext_path = plaintext_dir.join(format!("inventory.{index:02}.tmp"));
 
             let plaintext = fs::read(&plaintext_path)?;
             let encrypted = encrypt(&encryption_key, &plaintext)?;
@@ -523,9 +520,7 @@ pub fn verify_supply(
             "inventory is missing one or more inventory slots"
         );
 
-        println!(
-            "GLOBAL INTEGRITY: all coin numbers and inventory slots are unique and present."
-        );
+        println!("GLOBAL INTEGRITY: all coin numbers and inventory slots are unique and present.");
     } else {
         println!(
             "WARNING: encrypted records were not decrypted; global uniqueness was not checked."
@@ -535,4 +530,5 @@ pub fn verify_supply(
     println!("VALID: {total} {TICKER} inventory records.");
 
     Ok(())
-}     
+}
+        
