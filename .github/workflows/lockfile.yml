@@ -1,0 +1,31 @@
+name: Generate Cargo Lockfile
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  generate-lockfile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Generate Cargo.lock
+        run: cargo generate-lockfile
+
+      - name: Validate locked dependency resolution
+        run: cargo check --locked
+
+      - name: Upload Cargo.lock
+        uses: actions/upload-artifact@v4
+        with:
+          name: nezora-cargo-lockfile
+          path: Cargo.lock
+          if-no-files-found: error
+          retention-days: 7
