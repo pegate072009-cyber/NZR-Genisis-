@@ -38,15 +38,8 @@ fn make_fixture() -> Fixture {
     write_key(&signing_key_path, &signing_bytes);
     write_key(&public_key, &signing_key.verifying_key().to_bytes());
 
-    generate_supply_for_network(
-        &output,
-        1,
-        16,
-        "test",
-        &encryption_key,
-        &signing_key_path,
-    )
-    .unwrap();
+    generate_supply_for_network(&output, 1, 16, "test", &encryption_key, &signing_key_path)
+        .unwrap();
 
     Fixture {
         _temp: temp,
