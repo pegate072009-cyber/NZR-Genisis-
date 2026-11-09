@@ -288,6 +288,46 @@ mod tests {
     use std::fs;
     use tempfile::tempdir;
 
+    fn write_test_key(path: &Path, bytes: &[u8], private: bool) {
+        fs::write(path, bytes).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(
+                path,
+                fs::Permissions::from_mode(if private { 0o600 } else { 0o644 }),
+            )
+            .unwrap();
+        }
+    }
+
+    fn generated_test_release() -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf) {
+        let temp = tempdir().unwrap();
+        let inventory = temp.path().join("genesis-test");
+        let encryption_path = temp.path().join("encryption.key");
+        let signing_path = temp.path().join("signing.key");
+        let public_path = temp.path().join("public.key");
+        let encryption = [0x31u8; 32];
+        let signing = [0x42u8; 32];
+        let signing_key = SigningKey::from_bytes(&signing);
+
+        write_test_key(&encryption_path, &encryption, true);
+        write_test_key(&signing_path, &signing, true);
+        write_test_key(&public_path, &signing_key.verifying_key().to_bytes(), false);
+
+        generate_supply_for_network(
+            &inventory,
+            1,
+            16,
+            "test",
+            &encryption_path,
+            &signing_path,
+        )
+        .unwrap();
+
+        (temp, inventory, public_path, encryption_path)
+    }
+
     #[test]
     fn key_file_creation_writes_exact_bytes() {
         let temp = tempdir().unwrap();
@@ -311,7 +351,6 @@ mod tests {
     #[test]
     fn private_key_file_is_created_with_restricted_permissions() {
         use std::os::unix::fs::PermissionsExt;
-
         let temp = tempdir().unwrap();
         let path = temp.path().join("private.key");
         create_new_key_file(&path, &[0x22u8; 32], true).unwrap();
@@ -325,7 +364,6 @@ mod tests {
     #[test]
     fn public_key_file_is_created_with_public_permissions() {
         use std::os::unix::fs::PermissionsExt;
-
         let temp = tempdir().unwrap();
         let path = temp.path().join("public.key");
         create_new_key_file(&path, &[0x33u8; 32], false).unwrap();
@@ -348,19 +386,67 @@ mod tests {
     }
 
     #[test]
-    fn release_pins_detect_manifest_or_public_key_changes() {
-        let temp = tempdir().unwrap();
-        let inventory = temp.path().join("genesis");
-        fs::create_dir(&inventory).unwrap();
-        fs::write(inventory.join("manifest.json"), b"approved manifest").unwrap();
-
-        let signing_key = SigningKey::from_bytes(&[0x51; 32]);
-        let public_path = temp.path().join("public.key");
-        fs::write(&public_path, signing_key.verifying_key().to_bytes()).unwrap();
-
+    fn valid_release_passes_pinned_verification() {
+        let (_temp, inventory, public_path, encryption_path) = generated_test_release();
         let (manifest_pin, public_pin) = calculate_release_pins(&inventory, &public_path).unwrap();
-        assert!(verify_pinned(&inventory, &public_path, &manifest_pin, &public_pin, None).is_err());
+        verify_pinned(
+            &inventory,
+            &public_path,
+            &manifest_pin,
+            &public_pin,
+            Some(&encryption_path),
+        )
+        .unwrap();
+    }
 
+    #[test]
+    fn pinned_verification_rejects_wrong_manifest_pin() {
+        let (_temp, inventory, public_path, encryption_path) = generated_test_release();
+        let (_, public_pin) = calculate_release_pins(&inventory, &public_path).unwrap();
+        let wrong_manifest_pin = "00".repeat(32);
+        assert!(verify_pinned(
+            &inventory,
+            &public_path,
+            &wrong_manifest_pin,
+            &public_pin,
+            Some(&encryption_path),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn pinned_verification_rejects_wrong_public_key_pin() {
+        let (_temp, inventory, public_path, encryption_path) = generated_test_release();
+        let (manifest_pin, _) = calculate_release_pins(&inventory, &public_path).unwrap();
+        let wrong_public_pin = "ff".repeat(32);
+        assert!(verify_pinned(
+            &inventory,
+            &public_path,
+            &manifest_pin,
+            &wrong_public_pin,
+            Some(&encryption_path),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn pinned_verification_rejects_invalid_pin_format() {
+        let (_temp, inventory, public_path, encryption_path) = generated_test_release();
+        let (_, public_pin) = calculate_release_pins(&inventory, &public_path).unwrap();
+        assert!(verify_pinned(
+            &inventory,
+            &public_path,
+            "not-a-hash",
+            &public_pin,
+            Some(&encryption_path),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn release_pins_detect_manifest_changes() {
+        let (_temp, inventory, public_path, _encryption_path) = generated_test_release();
+        let (manifest_pin, public_pin) = calculate_release_pins(&inventory, &public_path).unwrap();
         fs::write(inventory.join("manifest.json"), b"changed manifest").unwrap();
         let (changed_manifest_pin, unchanged_public_pin) =
             calculate_release_pins(&inventory, &public_path).unwrap();
@@ -376,7 +462,6 @@ mod tests {
         let link = temp.path().join("manifest.json");
         fs::write(&target, b"manifest").unwrap();
         std::os::unix::fs::symlink(&target, &link).unwrap();
-
         assert!(read_manifest_for_pin(temp.path()).is_err());
     }
 }
