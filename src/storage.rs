@@ -588,15 +588,8 @@ mod tests {
         write_key(&public_path, &signing.verifying_key().to_bytes());
         let output = temp.path().join("test-genesis");
 
-        generate_supply_for_network(
-            &output,
-            1,
-            1000,
-            "test",
-            &encryption_path,
-            &signing_path,
-        )
-        .unwrap();
+        generate_supply_for_network(&output, 1, 1000, "test", &encryption_path, &signing_path)
+            .unwrap();
         verify_supply(&output, &public_path, Some(&encryption_path)).unwrap();
 
         let manifest: Manifest =
@@ -613,17 +606,15 @@ mod tests {
         let sign = temp.path().join("sign");
         write_key(&enc, &[1; 32]);
         write_key(&sign, &[2; 32]);
-        assert!(
-            generate_supply_for_network(
-                &temp.path().join("out"),
-                1,
-                1000,
-                "production",
-                &enc,
-                &sign
-            )
-            .is_err()
-        );
+        assert!(generate_supply_for_network(
+            &temp.path().join("out"),
+            1,
+            1000,
+            "production",
+            &enc,
+            &sign
+        )
+        .is_err());
     }
 
     #[test]
@@ -633,17 +624,15 @@ mod tests {
         let sign = temp.path().join("sign");
         write_key(&enc, &[1; 32]);
         write_key(&sign, &[2; 32]);
-        assert!(
-            generate_supply_for_network(
-                &temp.path().join("out"),
-                1,
-                u32::MAX,
-                "test",
-                &enc,
-                &sign
-            )
-            .is_err()
-        );
+        assert!(generate_supply_for_network(
+            &temp.path().join("out"),
+            1,
+            u32::MAX,
+            "test",
+            &enc,
+            &sign
+        )
+        .is_err());
     }
 
     #[test]
