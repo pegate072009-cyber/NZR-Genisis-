@@ -417,14 +417,16 @@ pub fn verify_supply(
         _ => anyhow::bail!("unrecognized Nezora network in manifest"),
     }
 
-    ensure!(!manifest.files.is_empty(), "manifest contains no inventory files");
+    ensure!(
+        !manifest.files.is_empty(),
+        "manifest contains no inventory files"
+    );
     let seed_bytes = hex::decode(&manifest.inventory_seed)?;
     let seed: [u8; 32] = seed_bytes
         .try_into()
         .map_err(|_| anyhow::anyhow!("inventory seed must be exactly 32 bytes"))?;
 
-    let bitmap_len =
-        usize::try_from((domain + 7) / 8).context("inventory bitmap too large")?;
+    let bitmap_len = usize::try_from((domain + 7) / 8).context("inventory bitmap too large")?;
     let mut coin_bitmap = encryption_key_path.map(|_| vec![0u8; bitmap_len]);
     let mut slot_bitmap = encryption_key_path.map(|_| vec![0u8; bitmap_len]);
     let encryption_key = match encryption_key_path {
@@ -471,8 +473,8 @@ pub fn verify_supply(
         );
 
         if let Some(key) = encryption_key.as_ref() {
-            let plaintext = decrypt(key, &encrypted)
-                .with_context(|| format!("decrypting {}", entry.file))?;
+            let plaintext =
+                decrypt(key, &encrypted).with_context(|| format!("decrypting {}", entry.file))?;
             let text = std::str::from_utf8(&plaintext)
                 .with_context(|| format!("{} is not valid UTF-8", entry.file))?;
             let mut file_records = 0u64;
