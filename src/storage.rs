@@ -1,6 +1,6 @@
 use crate::{
     coin::create_coin_record_with_seed,
-    crypto::{decrypt, encrypt, read_key, sha256_hex, sign_bytes, verify_signature},
+    crypto::{decrypt, encrypt, read_key, read_public_key, sha256_hex, sign_bytes, verify_signature},
     inventory::slot_for_coin,
     manifest::{FileEntry, Manifest},
     MAX_SUPPLY, NETWORK_NAME, TICKER,
@@ -388,7 +388,7 @@ pub fn verify_supply(
         Some(MAX_SIGNATURE_HEX_BYTES),
     )?;
     let signature = hex::decode(std::str::from_utf8(&signature_bytes)?.trim())?;
-    let public_key = read_key(public_key_path)?;
+    let public_key = read_public_key(public_key_path)?;
     verify_signature(&public_key, &manifest_bytes, &signature)?;
 
     let manifest: Manifest = serde_json::from_slice(&manifest_bytes)?;

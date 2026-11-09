@@ -12,8 +12,8 @@ pub fn sha256_hex(data: &[u8]) -> String {
     hex::encode(Sha256::digest(data))
 }
 
-/// Reads a 32-byte key only from a regular, non-symlink file.
-/// On Unix, private key files must not grant group/other permissions.
+/// Reads a 32-byte private key from a regular, non-symlink file.
+/// On Unix, group and other permissions must be disabled.
 pub fn read_key(path: &Path) -> Result<[u8; 32]> {
     let metadata =
         fs::symlink_metadata(path).with_context(|| format!("inspecting key {}", path.display()))?;
@@ -44,6 +44,35 @@ pub fn read_key(path: &Path) -> Result<[u8; 32]> {
         );
     }
 
+    read_exact_key_bytes(path)
+}
+
+/// Reads a 32-byte public verification key.
+/// Public keys may be world-readable, but symlinks and non-regular files are rejected.
+pub fn read_public_key(path: &Path) -> Result<[u8; 32]> {
+    let metadata = fs::symlink_metadata(path)
+        .with_context(|| format!("inspecting public key {}", path.display()))?;
+
+    ensure!(
+        !metadata.file_type().is_symlink(),
+        "refusing to read a symbolic-link public key: {}",
+        path.display()
+    );
+    ensure!(
+        metadata.is_file(),
+        "public key path is not a regular file: {}",
+        path.display()
+    );
+    ensure!(
+        metadata.len() == 32,
+        "public key {} must be exactly 32 bytes",
+        path.display()
+    );
+
+    read_exact_key_bytes(path)
+}
+
+fn read_exact_key_bytes(path: &Path) -> Result<[u8; 32]> {
     let bytes = fs::read(path).with_context(|| format!("reading key {}", path.display()))?;
     ensure!(
         bytes.len() == 32,
@@ -188,5 +217,38 @@ mod tests {
         fs::set_permissions(&target, fs::Permissions::from_mode(0o600)).unwrap();
         std::os::unix::fs::symlink(&target, &link).unwrap();
         assert!(read_key(&link).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_public_key_accepts_world_readable_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("public.key");
+        fs::write(&path, [3u8; 32]).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+
+        assert_eq!(read_public_key(&path).unwrap(), [3u8; 32]);
+    }
+
+    #[test]
+    fn read_public_key_rejects_wrong_length() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("public.key");
+        fs::write(&path, [3u8; 31]).unwrap();
+
+        assert!(read_public_key(&path).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_public_key_rejects_symlink() {
+        let dir = tempdir().unwrap();
+        let target = dir.path().join("target.key");
+        let link = dir.path().join("link.key");
+        fs::write(&target, [3u8; 32]).unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        assert!(read_public_key(&link).is_err());
     }
 }
