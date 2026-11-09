@@ -321,15 +321,8 @@ mod tests {
         write_test_key(&signing_path, &signing, true);
         write_test_key(&public_path, &signing_key.verifying_key().to_bytes(), false);
 
-        generate_supply_for_network(
-            &inventory,
-            1,
-            16,
-            "test",
-            &encryption_path,
-            &signing_path,
-        )
-        .unwrap();
+        generate_supply_for_network(&inventory, 1, 16, "test", &encryption_path, &signing_path)
+            .unwrap();
 
         (temp, inventory, public_path, encryption_path)
     }
