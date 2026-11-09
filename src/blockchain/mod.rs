@@ -2,6 +2,7 @@ pub mod block;
 pub mod chain;
 pub mod consensus;
 pub mod merkle;
+pub mod persistence;
 pub mod state;
 pub mod transaction;
 pub mod validation;
