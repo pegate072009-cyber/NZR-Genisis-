@@ -112,6 +112,12 @@ fn calculate_release_pins(dir: &Path, public_key_path: &Path) -> Result<(String,
     Ok((sha256_hex(&manifest), sha256_hex(&public_key)))
 }
 
+fn verified_release_pins(dir: &Path, public_key_path: &Path) -> Result<(String, String)> {
+    // Never issue release pins for an inventory whose manifest signature or file checksums fail.
+    verify_supply(dir, public_key_path, None)?;
+    calculate_release_pins(dir, public_key_path)
+}
+
 fn verify_pinned(
     dir: &Path,
     public_key_path: &Path,
@@ -272,7 +278,7 @@ fn main() -> Result<()> {
             )?;
         }
         Command::ReleasePins { dir, public_key } => {
-            let (manifest_hash, public_key_hash) = calculate_release_pins(&dir, &public_key)?;
+            let (manifest_hash, public_key_hash) = verified_release_pins(&dir, &public_key)?;
             println!("manifest_sha256={manifest_hash}");
             println!("public_key_sha256={public_key_hash}");
             println!("Publish both values through an independently trusted channel.");
@@ -441,6 +447,20 @@ mod tests {
             Some(&encryption_path),
         )
         .is_err());
+    }
+
+    #[test]
+    fn release_pins_refuse_invalid_or_tampered_inventory() {
+        let (_temp, inventory, public_path, _encryption_path) = generated_test_release();
+
+        assert!(verified_release_pins(&inventory, &public_path).is_ok());
+
+        let manifest_path = inventory.join("manifest.json");
+        let mut manifest = fs::read(&manifest_path).unwrap();
+        manifest.push(b' ');
+        fs::write(&manifest_path, manifest).unwrap();
+
+        assert!(verified_release_pins(&inventory, &public_path).is_err());
     }
 
     #[test]
