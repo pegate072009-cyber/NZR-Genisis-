@@ -8,7 +8,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use nezora_supply::storage::{generate_supply_for_network, verify_supply};
+use nezora_supply::{
+    crypto::{read_public_key, sha256_hex},
+    storage::{generate_supply_for_network, verify_supply},
+};
+
+const MAX_PINNED_MANIFEST_BYTES: u64 = 1_048_576;
 
 #[derive(Parser)]
 #[command(name = "nezora", version, about = "Nezora (NZR) Genesis Supply Tool")]
@@ -46,6 +51,94 @@ enum Command {
         #[arg(long)]
         encryption_key: Option<PathBuf>,
     },
+    /// Verifies the manifest hash and public-key fingerprint against values obtained independently.
+    VerifyPinned {
+        #[arg(long, default_value = "genesis")]
+        dir: PathBuf,
+        #[arg(long, default_value = "public/public.key")]
+        public_key: PathBuf,
+        /// SHA-256 hex digest of the exact approved manifest.json bytes (64 hex characters).
+        #[arg(long)]
+        expected_manifest_sha256: String,
+        /// SHA-256 hex digest of the exact 32-byte trusted Ed25519 public key (64 hex characters).
+        #[arg(long)]
+        expected_public_key_sha256: String,
+        #[arg(long)]
+        encryption_key: Option<PathBuf>,
+    },
+    /// Prints SHA-256 pins for an approved release. Publish these values separately from the files.
+    ReleasePins {
+        #[arg(long, default_value = "genesis")]
+        dir: PathBuf,
+        #[arg(long, default_value = "public/public.key")]
+        public_key: PathBuf,
+    },
+}
+
+fn validate_sha256_hex(value: &str, label: &str) -> Result<String> {
+    ensure!(
+        value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit()),
+        "{label} must be exactly 64 hexadecimal characters"
+    );
+    Ok(value.to_ascii_lowercase())
+}
+
+fn read_manifest_for_pin(dir: &Path) -> Result<Vec<u8>> {
+    let manifest_path = dir.join("manifest.json");
+    let metadata = fs::symlink_metadata(&manifest_path)
+        .with_context(|| format!("inspecting manifest {}", manifest_path.display()))?;
+
+    ensure!(
+        !metadata.file_type().is_symlink() && metadata.is_file(),
+        "manifest must be a regular, non-symlink file"
+    );
+    ensure!(
+        metadata.len() <= MAX_PINNED_MANIFEST_BYTES,
+        "manifest exceeds the maximum permitted size"
+    );
+
+    let bytes = fs::read(&manifest_path)
+        .with_context(|| format!("reading manifest {}", manifest_path.display()))?;
+    ensure!(
+        bytes.len() as u64 <= MAX_PINNED_MANIFEST_BYTES,
+        "manifest changed size while being read"
+    );
+    Ok(bytes)
+}
+
+fn calculate_release_pins(dir: &Path, public_key_path: &Path) -> Result<(String, String)> {
+    let manifest = read_manifest_for_pin(dir)?;
+    let public_key = read_public_key(public_key_path)?;
+    Ok((sha256_hex(&manifest), sha256_hex(&public_key)))
+}
+
+fn verify_pinned(
+    dir: &Path,
+    public_key_path: &Path,
+    expected_manifest_sha256: &str,
+    expected_public_key_sha256: &str,
+    encryption_key: Option<&Path>,
+) -> Result<()> {
+    let expected_manifest_sha256 =
+        validate_sha256_hex(expected_manifest_sha256, "expected manifest SHA-256")?;
+    let expected_public_key_sha256 =
+        validate_sha256_hex(expected_public_key_sha256, "expected public-key SHA-256")?;
+
+    let (actual_manifest_sha256, actual_public_key_sha256) =
+        calculate_release_pins(dir, public_key_path)?;
+
+    ensure!(
+        actual_manifest_sha256 == expected_manifest_sha256,
+        "manifest SHA-256 does not match the independently trusted pin"
+    );
+    ensure!(
+        actual_public_key_sha256 == expected_public_key_sha256,
+        "public-key SHA-256 does not match the independently trusted pin"
+    );
+
+    verify_supply(dir, public_key_path, encryption_key)?;
+    println!("PINNED GENESIS: manifest hash and trusted public-key fingerprint match.");
+    Ok(())
 }
 
 fn create_new_key_file(path: &Path, bytes: &[u8], private: bool) -> Result<()> {
@@ -163,6 +256,27 @@ fn main() -> Result<()> {
         } => {
             verify_supply(&dir, &public_key, encryption_key.as_deref())?;
         }
+        Command::VerifyPinned {
+            dir,
+            public_key,
+            expected_manifest_sha256,
+            expected_public_key_sha256,
+            encryption_key,
+        } => {
+            verify_pinned(
+                &dir,
+                &public_key,
+                &expected_manifest_sha256,
+                &expected_public_key_sha256,
+                encryption_key.as_deref(),
+            )?;
+        }
+        Command::ReleasePins { dir, public_key } => {
+            let (manifest_hash, public_key_hash) = calculate_release_pins(&dir, &public_key)?;
+            println!("manifest_sha256={manifest_hash}");
+            println!("public_key_sha256={public_key_hash}");
+            println!("Publish both values through an independently trusted channel.");
+        }
     }
     Ok(())
 }
@@ -170,6 +284,7 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ed25519_dalek::SigningKey;
     use std::fs;
     use tempfile::tempdir;
 
@@ -218,5 +333,57 @@ mod tests {
             fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o644
         );
+    }
+
+    #[test]
+    fn sha256_pin_validation_accepts_valid_hex_and_normalizes_case() {
+        let pin = "AB".repeat(32);
+        assert_eq!(validate_sha256_hex(&pin, "test").unwrap(), "ab".repeat(32));
+    }
+
+    #[test]
+    fn sha256_pin_validation_rejects_bad_length_and_non_hex() {
+        assert!(validate_sha256_hex("abc", "test").is_err());
+        assert!(validate_sha256_hex(&"g".repeat(64), "test").is_err());
+    }
+
+    #[test]
+    fn release_pins_detect_manifest_or_public_key_changes() {
+        let temp = tempdir().unwrap();
+        let inventory = temp.path().join("genesis");
+        fs::create_dir(&inventory).unwrap();
+        fs::write(inventory.join("manifest.json"), b"approved manifest").unwrap();
+
+        let signing_key = SigningKey::from_bytes(&[0x51; 32]);
+        let public_path = temp.path().join("public.key");
+        fs::write(&public_path, signing_key.verifying_key().to_bytes()).unwrap();
+
+        let (manifest_pin, public_pin) = calculate_release_pins(&inventory, &public_path).unwrap();
+        assert!(verify_pinned(
+            &inventory,
+            &public_path,
+            &manifest_pin,
+            &public_pin,
+            None
+        )
+        .is_err());
+
+        fs::write(inventory.join("manifest.json"), b"changed manifest").unwrap();
+        let (changed_manifest_pin, unchanged_public_pin) =
+            calculate_release_pins(&inventory, &public_path).unwrap();
+        assert_ne!(manifest_pin, changed_manifest_pin);
+        assert_eq!(public_pin, unchanged_public_pin);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pin_manifest_reader_rejects_symlink() {
+        let temp = tempdir().unwrap();
+        let target = temp.path().join("target.json");
+        let link = temp.path().join("manifest.json");
+        fs::write(&target, b"manifest").unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        assert!(read_manifest_for_pin(temp.path()).is_err());
     }
 }
