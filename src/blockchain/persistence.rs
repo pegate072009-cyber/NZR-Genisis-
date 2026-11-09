@@ -36,7 +36,10 @@ pub fn save_chain(path: &Path, chain: &Chain, params: &ConsensusParams) -> Resul
     fs::create_dir_all(parent)?;
 
     if let Ok(meta) = fs::symlink_metadata(path) {
-        ensure!(!meta.file_type().is_symlink(), "refusing to replace a symlink");
+        ensure!(
+            !meta.file_type().is_symlink(),
+            "refusing to replace a symlink"
+        );
         ensure!(meta.is_file(), "chain path is not a regular file");
     }
 
