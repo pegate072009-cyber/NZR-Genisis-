@@ -1,6 +1,8 @@
 use crate::{
     coin::create_coin_record_with_seed,
-    crypto::{decrypt, encrypt, read_key, read_public_key, sha256_hex, sign_bytes, verify_signature},
+    crypto::{
+        decrypt, encrypt, read_key, read_public_key, sha256_hex, sign_bytes, verify_signature,
+    },
     inventory::slot_for_coin,
     manifest::{FileEntry, Manifest},
     MAX_SUPPLY, NETWORK_NAME, TICKER,
