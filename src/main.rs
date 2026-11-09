@@ -359,14 +359,7 @@ mod tests {
         fs::write(&public_path, signing_key.verifying_key().to_bytes()).unwrap();
 
         let (manifest_pin, public_pin) = calculate_release_pins(&inventory, &public_path).unwrap();
-        assert!(verify_pinned(
-            &inventory,
-            &public_path,
-            &manifest_pin,
-            &public_pin,
-            None
-        )
-        .is_err());
+        assert!(verify_pinned(&inventory, &public_path, &manifest_pin, &public_pin, None).is_err());
 
         fs::write(inventory.join("manifest.json"), b"changed manifest").unwrap();
         let (changed_manifest_pin, unchanged_public_pin) =
