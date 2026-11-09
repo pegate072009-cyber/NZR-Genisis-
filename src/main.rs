@@ -51,38 +51,56 @@ enum Command {
 fn create_new_key_file(path: &Path, bytes: &[u8], private: bool) -> Result<()> {
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
+
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(if private { 0o600 } else { 0o644 });
     }
-    let mut file = options.open(path)
+
+    let mut file = options
+        .open(path)
         .with_context(|| format!("creating key file without overwriting: {}", path.display()))?;
-    file.write_all(bytes).with_context(|| format!("writing key file {}", path.display()))?;
-    file.sync_all().with_context(|| format!("syncing key file {}", path.display()))?;
+    file.write_all(bytes)
+        .with_context(|| format!("writing key file {}", path.display()))?;
+    file.sync_all()
+        .with_context(|| format!("syncing key file {}", path.display()))?;
     Ok(())
 }
 
 fn init_keys(dir: &Path) -> Result<()> {
     fs::create_dir_all(dir).with_context(|| format!("creating key directory {}", dir.display()))?;
     let meta = fs::symlink_metadata(dir)?;
-    ensure!(!meta.file_type().is_symlink() && meta.is_dir(), "private key directory must be a real directory");
+    ensure!(
+        !meta.file_type().is_symlink() && meta.is_dir(),
+        "private key directory must be a real directory"
+    );
+
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(dir, fs::Permissions::from_mode(0o700))
             .context("restricting private key directory permissions")?;
     }
+
     let public_dir = Path::new("public");
     fs::create_dir_all(public_dir)?;
     let public_meta = fs::symlink_metadata(public_dir)?;
-    ensure!(!public_meta.file_type().is_symlink() && public_meta.is_dir(), "public key directory must be a real directory");
+    ensure!(
+        !public_meta.file_type().is_symlink() && public_meta.is_dir(),
+        "public key directory must be a real directory"
+    );
 
     let encryption_path = dir.join("encryption.key");
     let signing_path = dir.join("signing.key");
     let public_path = public_dir.join("public.key");
+
     for path in [&encryption_path, &signing_path, &public_path] {
-        ensure!(fs::symlink_metadata(path).is_err(), "key already exists; refusing to overwrite: {}", path.display());
+        ensure!(
+            fs::symlink_metadata(path).is_err(),
+            "key already exists; refusing to overwrite: {}",
+            path.display()
+        );
     }
 
     let mut encryption_key = [0u8; 32];
@@ -90,6 +108,7 @@ fn init_keys(dir: &Path) -> Result<()> {
     let signing_key = SigningKey::generate(&mut OsRng);
     let public_key = signing_key.verifying_key().to_bytes();
     let mut created = Vec::new();
+
     let result = (|| -> Result<()> {
         create_new_key_file(&encryption_path, &encryption_key, true)?;
         created.push(encryption_path.clone());
@@ -99,11 +118,18 @@ fn init_keys(dir: &Path) -> Result<()> {
         created.push(public_path.clone());
         Ok(())
     })();
+
     encryption_key.fill(0);
+
     if let Err(error) = result {
-        for path in created.iter().rev() { let _ = fs::remove_file(path); }
-        return Err(error).context("key initialization failed; newly created files were cleaned up where possible");
+        for path in created.iter().rev() {
+            let _ = fs::remove_file(path);
+        }
+        return Err(error).context(
+            "key initialization failed; newly created files were cleaned up where possible",
+        );
     }
+
     println!("Nezora keys created.");
     println!("Keep encryption.key and signing.key private and backed up.");
     println!("Publish only public/public.key.");
@@ -113,10 +139,28 @@ fn init_keys(dir: &Path) -> Result<()> {
 fn main() -> Result<()> {
     match Cli::parse().command {
         Command::InitKeys { dir } => init_keys(&dir)?,
-        Command::Generate { out, files, coins_per_file, network, encryption_key, signing_key } => {
-            generate_supply_for_network(&out, files, coins_per_file, &network, &encryption_key, &signing_key)?;
+        Command::Generate {
+            out,
+            files,
+            coins_per_file,
+            network,
+            encryption_key,
+            signing_key,
+        } => {
+            generate_supply_for_network(
+                &out,
+                files,
+                coins_per_file,
+                &network,
+                &encryption_key,
+                &signing_key,
+            )?;
         }
-        Command::Verify { dir, public_key, encryption_key } => {
+        Command::Verify {
+            dir,
+            public_key,
+            encryption_key,
+        } => {
             verify_supply(&dir, &public_key, encryption_key.as_deref())?;
         }
     }
@@ -152,6 +196,7 @@ mod tests {
     #[test]
     fn private_key_file_is_created_with_restricted_permissions() {
         use std::os::unix::fs::PermissionsExt;
+
         let temp = tempdir().unwrap();
         let path = temp.path().join("private.key");
         create_new_key_file(&path, &[0x22u8; 32], true).unwrap();
@@ -162,6 +207,7 @@ mod tests {
     #[test]
     fn public_key_file_is_created_with_public_permissions() {
         use std::os::unix::fs::PermissionsExt;
+
         let temp = tempdir().unwrap();
         let path = temp.path().join("public.key");
         create_new_key_file(&path, &[0x33u8; 32], false).unwrap();
