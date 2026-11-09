@@ -200,7 +200,10 @@ mod tests {
         let temp = tempdir().unwrap();
         let path = temp.path().join("private.key");
         create_new_key_file(&path, &[0x22u8; 32], true).unwrap();
-        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
     }
 
     #[cfg(unix)]
@@ -211,6 +214,9 @@ mod tests {
         let temp = tempdir().unwrap();
         let path = temp.path().join("public.key");
         create_new_key_file(&path, &[0x33u8; 32], false).unwrap();
-        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o644);
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
     }
 }
