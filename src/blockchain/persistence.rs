@@ -29,7 +29,10 @@ fn temporary_path(path: &Path) -> Result<PathBuf> {
 pub fn save_chain(path: &Path, chain: &Chain, params: &ConsensusParams) -> Result<()> {
     chain.verify_integrity(params)?;
 
-    let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
     fs::create_dir_all(parent)?;
 
     if let Ok(meta) = fs::symlink_metadata(path) {
@@ -41,17 +44,26 @@ pub fn save_chain(path: &Path, chain: &Chain, params: &ConsensusParams) -> Resul
         format_version: CHAIN_FORMAT_VERSION,
         blocks: chain.blocks.clone(),
     })?;
-    ensure!(data.len() as u64 <= MAX_CHAIN_FILE_BYTES, "chain file exceeds size limit");
+    ensure!(
+        data.len() as u64 <= MAX_CHAIN_FILE_BYTES,
+        "chain file exceeds size limit"
+    );
 
     let temp = temporary_path(path)?;
     if let Ok(meta) = fs::symlink_metadata(&temp) {
-        ensure!(!meta.file_type().is_symlink(), "temporary chain path is a symlink");
+        ensure!(
+            !meta.file_type().is_symlink(),
+            "temporary chain path is a symlink"
+        );
         ensure!(meta.is_file(), "temporary chain path is not a regular file");
         fs::remove_file(&temp)?;
     }
 
     let write_result = (|| -> Result<()> {
-        let mut file = OpenOptions::new().write(true).create_new(true).open(&temp)?;
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)?;
         file.write_all(&data)?;
         file.sync_all()?;
         drop(file);
@@ -68,15 +80,27 @@ pub fn save_chain(path: &Path, chain: &Chain, params: &ConsensusParams) -> Resul
 /// Load blocks and rebuild ledger state by validating/replaying every block.
 pub fn load_chain(path: &Path, params: &ConsensusParams) -> Result<Chain> {
     let metadata = fs::symlink_metadata(path).context("inspecting chain file")?;
-    ensure!(!metadata.file_type().is_symlink(), "refusing to read a symlink chain file");
+    ensure!(
+        !metadata.file_type().is_symlink(),
+        "refusing to read a symlink chain file"
+    );
     ensure!(metadata.is_file(), "chain path is not a regular file");
-    ensure!(metadata.len() <= MAX_CHAIN_FILE_BYTES, "chain file exceeds size limit");
+    ensure!(
+        metadata.len() <= MAX_CHAIN_FILE_BYTES,
+        "chain file exceeds size limit"
+    );
 
     let bytes = fs::read(path).context("reading chain file")?;
-    ensure!(bytes.len() as u64 <= MAX_CHAIN_FILE_BYTES, "chain file grew beyond size limit");
+    ensure!(
+        bytes.len() as u64 <= MAX_CHAIN_FILE_BYTES,
+        "chain file grew beyond size limit"
+    );
 
     let stored: ChainFile = serde_json::from_slice(&bytes).context("parsing chain file")?;
-    ensure!(stored.format_version == CHAIN_FORMAT_VERSION, "unsupported chain file version");
+    ensure!(
+        stored.format_version == CHAIN_FORMAT_VERSION,
+        "unsupported chain file version"
+    );
 
     let mut chain = Chain::default();
     for block in stored.blocks {
@@ -97,6 +121,10 @@ mod tests {
     #[test]
     fn rejects_missing_chain_file() {
         let dir = tempdir().unwrap();
-        assert!(load_chain(&dir.path().join("missing.json"), &ConsensusParams::default()).is_err());
+        assert!(load_chain(
+            &dir.path().join("missing.json"),
+            &ConsensusParams::default()
+        )
+        .is_err());
     }
 }
