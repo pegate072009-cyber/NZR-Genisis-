@@ -16,7 +16,7 @@ use super::{
 pub fn mine_block(
     chain: &Chain,
     miner_address: [u8; 32],
-    transactions: Vec<Transaction>,
+    mut transactions: Vec<Transaction>,
     timestamp: u64,
     current_time: u64,
     max_nonce_attempts: u64,
@@ -43,6 +43,9 @@ pub fn mine_block(
     );
     let reward_coin_id = create_block_reward_id(reward_coin_number);
     let difficulty_bits = expected_difficulty_bits(chain, height, params)?;
+
+    // Consensus requires a single canonical transaction order in every block.
+    transactions.sort_by_key(Transaction::id);
 
     let mut block = Block {
         version: params.protocol_version,

@@ -1,7 +1,8 @@
 use anyhow::{ensure, Result};
-use std::collections::HashSet;
-
 use crate::coin::create_block_reward_id;
+
+pub const MAX_TRANSACTIONS_PER_BLOCK: usize = 10_000;
+pub const MAX_OUTPUTS_PER_TRANSACTION: usize = 100;
 
 use super::{
     block::Block,
@@ -111,13 +112,28 @@ pub fn validate_block(
         "transaction Merkle root mismatch"
     );
 
-    let mut transaction_ids = HashSet::new();
+    ensure!(
+        block.transactions.len() <= MAX_TRANSACTIONS_PER_BLOCK,
+        "block contains too many transactions"
+    );
+
+    let mut previous_transaction_id: Option<[u8; 32]> = None;
 
     for tx in &block.transactions {
         ensure!(
-            transaction_ids.insert(tx.id()),
-            "duplicate transaction in block"
+            tx.outputs.len() <= MAX_OUTPUTS_PER_TRANSACTION,
+            "transaction contains too many outputs"
         );
+
+        let transaction_id = tx.id();
+        if let Some(previous_id) = previous_transaction_id {
+            ensure!(
+                previous_id < transaction_id,
+                "transactions must be strictly ordered by transaction ID"
+            );
+        }
+        previous_transaction_id = Some(transaction_id);
+
         tx.verify_protocol_version(params.protocol_version)?;
     }
 
@@ -156,7 +172,8 @@ mod tests {
 
     const NOW: u64 = 1_000_000;
 
-    fn candidate_block(params: &ConsensusParams, transactions: Vec<Transaction>) -> Block {
+    fn candidate_block(params: &ConsensusParams, mut transactions: Vec<Transaction>) -> Block {
+        transactions.sort_by_key(Transaction::id);
         let mut block = Block {
             version: params.protocol_version,
             height: 1,
@@ -315,6 +332,48 @@ mod tests {
         assert_eq!(state.next_nonce, before.next_nonce);
         assert_eq!(state.issued_coin_ids, before.issued_coin_ids);
         assert_eq!(state.issued_coin_count, before.issued_coin_count);
+    }
+
+    #[test]
+    fn rejects_transactions_not_in_canonical_id_order() {
+        let params = ConsensusParams::default();
+        let first = signed_test_transaction();
+        let second_key = SigningKey::from_bytes(&[20u8; 32]);
+        let second = Transaction::sign(
+            2,
+            0,
+            vec![TxOutput { recipient: [9u8; 32], amount: 1 }],
+            &second_key,
+        ).unwrap();
+        let mut block = candidate_block(&params, vec![first, second]);
+        block.transactions.reverse();
+        block.transaction_root = block.calculate_transaction_root();
+        block.nonce = 0;
+        while !meets_target(&block.hash(), block.difficulty_bits) {
+            block.nonce = block.nonce.checked_add(1).unwrap();
+        }
+        assert_rejected_without_state_change(block);
+    }
+
+    #[test]
+    fn rejects_transaction_with_too_many_outputs() {
+        let params = ConsensusParams::default();
+        let key = SigningKey::from_bytes(&[21u8; 32]);
+        let outputs = (0..=MAX_OUTPUTS_PER_TRANSACTION)
+            .map(|index| TxOutput { recipient: [index as u8; 32], amount: 1 })
+            .collect();
+        let tx = Transaction::sign(2, 0, outputs, &key).unwrap();
+        let block = candidate_block(&params, vec![tx]);
+        assert_rejected_without_state_change(block);
+    }
+
+    #[test]
+    fn rejects_block_with_too_many_transactions() {
+        let params = ConsensusParams::default();
+        let tx = signed_test_transaction();
+        let transactions = vec![tx; MAX_TRANSACTIONS_PER_BLOCK + 1];
+        let block = candidate_block(&params, transactions);
+        assert_rejected_without_state_change(block);
     }
 
     #[test]
