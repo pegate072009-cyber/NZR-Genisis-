@@ -217,7 +217,10 @@ mod tests {
         assert_eq!(loaded.state.balances, original.state.balances);
         assert_eq!(loaded.state.next_nonce, original.state.next_nonce);
         assert_eq!(loaded.state.issued_coin_ids, original.state.issued_coin_ids);
-        assert_eq!(loaded.state.issued_coin_count, original.state.issued_coin_count);
+        assert_eq!(
+            loaded.state.issued_coin_count,
+            original.state.issued_coin_count
+        );
         assert!(loaded.verify_integrity(&params).is_ok());
     }
 
