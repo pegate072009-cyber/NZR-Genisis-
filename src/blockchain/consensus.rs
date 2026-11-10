@@ -84,8 +84,12 @@ pub fn expected_difficulty_bits(
         return Ok(params.initial_difficulty_bits);
     }
 
+    let expected_height = chain
+        .height()
+        .checked_add(1)
+        .ok_or_else(|| anyhow::anyhow!("chain height overflow"))?;
     ensure!(
-        next_height == chain.height() + 1,
+        next_height == expected_height,
         "candidate height does not follow chain tip"
     );
 
@@ -95,8 +99,11 @@ pub fn expected_difficulty_bits(
         .expect("non-empty chain has a tip")
         .difficulty_bits;
 
+    let retarget_interval = usize::try_from(params.retarget_interval)
+        .map_err(|_| anyhow::anyhow!("retarget interval does not fit this platform"))?;
+
     if (next_height - 1) % params.retarget_interval != 0
-        || chain.blocks.len() < params.retarget_interval as usize
+        || chain.blocks.len() < retarget_interval
     {
         return Ok(previous_bits);
     }
@@ -106,7 +113,7 @@ pub fn expected_difficulty_bits(
         .checked_mul(params.target_block_time_secs)
         .ok_or_else(|| anyhow::anyhow!("retarget target span overflow"))?;
 
-    let first_index = chain.blocks.len() - params.retarget_interval as usize;
+    let first_index = chain.blocks.len() - retarget_interval;
     let first_time = chain.blocks[first_index].timestamp;
     let last_time = chain
         .blocks
@@ -212,6 +219,40 @@ mod tests {
         };
 
         assert_eq!(expected_difficulty_bits(&chain, 3, &params).unwrap(), 12);
+    }
+
+    #[test]
+    fn fast_retarget_increases_difficulty_within_configured_limit() {
+        let params = ConsensusParams {
+            retarget_interval: 2,
+            target_block_time_secs: 10,
+            initial_difficulty_bits: 12,
+            max_difficulty_bits: 13,
+            ..ConsensusParams::default()
+        };
+        let chain = Chain {
+            blocks: vec![test_block(1, 12), test_block(2, 12)],
+            state: LedgerState::default(),
+        };
+
+        assert_eq!(expected_difficulty_bits(&chain, 3, &params).unwrap(), 13);
+    }
+
+    #[test]
+    fn slow_retarget_decreases_difficulty_but_not_below_baseline() {
+        let params = ConsensusParams {
+            retarget_interval: 2,
+            target_block_time_secs: 10,
+            initial_difficulty_bits: 12,
+            max_difficulty_bits: 20,
+            ..ConsensusParams::default()
+        };
+        let chain = Chain {
+            blocks: vec![test_block(1, 15), test_block(30, 15)],
+            state: LedgerState::default(),
+        };
+
+        assert_eq!(expected_difficulty_bits(&chain, 3, &params).unwrap(), 14);
     }
 
     #[test]
