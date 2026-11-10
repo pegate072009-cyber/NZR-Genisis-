@@ -1,10 +1,10 @@
 use nezora_supply::{
     blockchain::{
-        mining::mine_block,
+        mining::{meets_target, mine_block},
         persistence::{load_chain, save_chain},
         Block, Chain, ConsensusParams,
     },
-    coin::create_coin_record_with_seed,
+    coin::create_block_reward_id,
 };
 
 fn test_params() -> ConsensusParams {
@@ -15,25 +15,10 @@ fn test_params() -> ConsensusParams {
     }
 }
 
-fn coin_id(seed: &[u8; 32], number: u64) -> [u8; 32] {
-    let encoded = create_coin_record_with_seed(seed, number);
-    let bytes = hex::decode(encoded).unwrap();
-    let mut id = [0u8; 32];
-    id.copy_from_slice(&bytes);
-    id
-}
-
-fn mine_next(
-    chain: &Chain,
-    miner: [u8; 32],
-    reward_id: [u8; 32],
-    timestamp: u64,
-    params: &ConsensusParams,
-) -> Block {
+fn mine_next(chain: &Chain, miner: [u8; 32], timestamp: u64, params: &ConsensusParams) -> Block {
     mine_block(
         chain,
         miner,
-        reward_id,
         Vec::new(),
         timestamp,
         timestamp,
@@ -44,55 +29,56 @@ fn mine_next(
 }
 
 #[test]
-fn rejects_duplicate_reward_id_without_changing_chain() {
+fn rejects_forged_or_reused_reward_identifier_without_changing_chain() {
     let params = test_params();
-    let seed = [0x5Au8; 32];
     let miner = [0x17u8; 32];
-    let first_reward_id = coin_id(&seed, 1);
     let mut chain = Chain::default();
 
-    let first_block = mine_next(&chain, miner, first_reward_id, 1_800_000_000, &params);
+    let first_block = mine_next(&chain, miner, 1_800_000_000, &params);
+    assert_eq!(first_block.reward_coin_id, create_block_reward_id(1));
     chain
-        .accept_block(first_block, first_reward_id, &params, 1_800_000_000)
+        .accept_block(first_block.clone(), &params, 1_800_000_000)
         .unwrap();
 
     let previous_height = chain.height();
     let previous_tip = chain.tip_hash();
     let previous_state = chain.state.clone();
 
-    let duplicate_result = mine_block(
-        &chain,
-        miner,
-        first_reward_id,
-        Vec::new(),
-        1_800_000_001,
-        1_800_000_001,
-        100_000,
-        &params,
+    let mut forged = mine_next(&chain, miner, 1_800_000_001, &params);
+    forged.reward_coin_id = first_block.reward_coin_id;
+    forged.nonce = 0;
+    let mut found_nonce = false;
+    for _ in 0..100_000 {
+        if meets_target(&forged.hash(), forged.difficulty_bits) {
+            found_nonce = true;
+            break;
+        }
+        forged.nonce += 1;
+    }
+    assert!(
+        found_nonce,
+        "test nonce search should find a valid proof of work"
     );
 
-    assert!(duplicate_result.is_err());
+    let result = chain.accept_block(forged, &params, 1_800_000_001);
+    assert!(result.is_err());
     assert_eq!(chain.height(), previous_height);
     assert_eq!(chain.tip_hash(), previous_tip);
     assert_eq!(chain.state.balances, previous_state.balances);
     assert_eq!(chain.state.issued_coin_ids, previous_state.issued_coin_ids);
-    assert_eq!(
-        chain.state.issued_coin_count,
-        previous_state.issued_coin_count
-    );
+    assert_eq!(chain.state.issued_coin_count, previous_state.issued_coin_count);
 }
 
 #[test]
 fn rejects_block_tampered_after_mining_without_changing_chain() {
     let params = test_params();
-    let reward_id = coin_id(&[0x5Au8; 32], 1);
     let miner = [0x27u8; 32];
     let mut chain = Chain::default();
 
-    let mut block = mine_next(&chain, miner, reward_id, 1_800_000_000, &params);
+    let mut block = mine_next(&chain, miner, 1_800_000_000, &params);
     block.miner_address[0] ^= 0x01;
 
-    let result = chain.accept_block(block, reward_id, &params, 1_800_000_000);
+    let result = chain.accept_block(block, &params, 1_800_000_000);
 
     assert!(result.is_err());
     assert_eq!(chain.height(), 0);
@@ -104,14 +90,11 @@ fn rejects_block_tampered_after_mining_without_changing_chain() {
 #[test]
 fn rejects_persisted_chain_with_modified_block_data() {
     let params = test_params();
-    let reward_id = coin_id(&[0x6Bu8; 32], 1);
     let miner = [0x38u8; 32];
     let mut chain = Chain::default();
 
-    let block = mine_next(&chain, miner, reward_id, 1_800_000_000, &params);
-    chain
-        .accept_block(block, reward_id, &params, 1_800_000_000)
-        .unwrap();
+    let block = mine_next(&chain, miner, 1_800_000_000, &params);
+    chain.accept_block(block, &params, 1_800_000_000).unwrap();
 
     let directory = tempfile::tempdir().unwrap();
     let chain_path = directory.path().join("chain.json");
@@ -135,5 +118,14 @@ fn rejects_corrupted_chain_file_without_returning_partial_chain() {
 
     std::fs::write(&chain_path, b"{not valid json").unwrap();
 
+    assert!(load_chain(&chain_path, &params).is_err());
+}
+
+#[test]
+fn rejects_old_chain_format_version() {
+    let params = test_params();
+    let directory = tempfile::tempdir().unwrap();
+    let chain_path = directory.path().join("chain.json");
+    std::fs::write(&chain_path, br#"{"format_version":1,"blocks":[]}"#).unwrap();
     assert!(load_chain(&chain_path, &params).is_err());
 }

@@ -4,7 +4,7 @@ use nezora_supply::{
         persistence::{load_chain, save_chain},
         Chain, ConsensusParams,
     },
-    coin::create_coin_record_with_seed,
+    coin::create_block_reward_id,
 };
 
 fn test_params() -> ConsensusParams {
@@ -19,30 +19,20 @@ fn test_params() -> ConsensusParams {
 fn mined_block_is_accepted_saved_and_reloaded() {
     let params = test_params();
     let mut chain = Chain::default();
-    let seed = [0x5Au8; 32];
     let miner = [0x17u8; 32];
-    let reward_id_hex = create_coin_record_with_seed(&seed, 1);
-    let reward_id_vec = hex::decode(reward_id_hex).unwrap();
-    let mut reward_id = [0u8; 32];
-    reward_id.copy_from_slice(&reward_id_vec);
     let now = 1_800_000_000u64;
 
-    let block = mine_block(
-        &chain,
-        miner,
-        reward_id,
-        Vec::new(),
-        now,
-        now,
-        100_000,
-        &params,
-    )
+    let block = mine_block(&chain, miner, Vec::new(), now, now, 100_000, &params)
     .unwrap();
 
-    chain.accept_block(block, reward_id, &params, now).unwrap();
+    chain.accept_block(block, &params, now).unwrap();
 
     assert_eq!(chain.height(), 1);
     assert_eq!(chain.state.issued_coin_count, 1);
+    assert!(chain
+        .state
+        .issued_coin_ids
+        .contains(&create_block_reward_id(1)));
     assert_eq!(chain.state.balances.get(&miner), Some(&1));
 
     let directory = tempfile::tempdir().unwrap();
@@ -66,7 +56,6 @@ fn mining_rejects_reward_beyond_maximum_supply() {
     let result = mine_block(
         &chain,
         [0x21u8; 32],
-        [0x33u8; 32],
         Vec::new(),
         1_800_000_000,
         1_800_000_000,
