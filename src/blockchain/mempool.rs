@@ -75,7 +75,11 @@ impl Mempool {
             "sender already has a pending transaction"
         );
 
-        let expected_nonce = *chain.state.next_nonce.get(&transaction.sender).unwrap_or(&0);
+        let expected_nonce = *chain
+            .state
+            .next_nonce
+            .get(&transaction.sender)
+            .unwrap_or(&0);
         ensure!(
             transaction.nonce == expected_nonce,
             "transaction nonce does not match confirmed account nonce"
