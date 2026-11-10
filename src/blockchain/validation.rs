@@ -11,6 +11,17 @@ use super::{
 };
 
 pub const MAX_TRANSACTIONS_PER_BLOCK: usize = 10_000;
+pub const MAX_BLOCK_SIZE_BYTES: usize = 1_048_576;
+pub const MAX_BLOCK_BYTES: usize = 1_000_000;
+
+fn validate_block_size(block: &Block) -> Result<()> {
+    let encoded = serde_json::to_vec(block)?;
+    ensure!(
+        encoded.len() <= MAX_BLOCK_BYTES,
+        "serialized block exceeds maximum size"
+    );
+    Ok(())
+}
 
 fn meets_target(hash: &[u8; 32], difficulty_bits: u16) -> bool {
     let bits = difficulty_bits as usize;
@@ -49,6 +60,12 @@ pub fn validate_block(
     current_time: u64,
 ) -> Result<()> {
     params.validate()?;
+
+    let serialized_size = serde_json::to_vec(block)?.len();
+    ensure!(
+        serialized_size <= MAX_BLOCK_SIZE_BYTES,
+        "block exceeds maximum serialized size"
+    );
 
     let expected_height = chain
         .height()
@@ -117,6 +134,7 @@ pub fn validate_block(
         block.transactions.len() <= MAX_TRANSACTIONS_PER_BLOCK,
         "block contains too many transactions"
     );
+    validate_block_size(block)?;
 
     let mut previous_transaction_id: Option<[u8; 32]> = None;
 
@@ -223,6 +241,24 @@ mod tests {
         assert_eq!(chain.state.issued_coin_ids, before.issued_coin_ids);
         assert_eq!(chain.state.issued_coin_count, before.issued_coin_count);
         assert!(chain.blocks.is_empty());
+    }
+
+    #[test]
+    fn rejects_block_exceeding_serialized_size_limit() {
+        let params = ConsensusParams::default();
+        let tx = signed_test_transaction();
+        let mut block = candidate_block(&params, Vec::new());
+        block.transactions = vec![tx; MAX_TRANSACTIONS_PER_BLOCK];
+
+        assert!(validate_block_size(&block).is_err());
+    }
+
+    #[test]
+    fn accepts_block_within_serialized_size_limit() {
+        let params = ConsensusParams::default();
+        let block = candidate_block(&params, Vec::new());
+
+        assert!(validate_block_size(&block).is_ok());
     }
 
     #[test]
@@ -391,6 +427,21 @@ mod tests {
         let transactions = vec![tx; MAX_TRANSACTIONS_PER_BLOCK + 1];
         let block = candidate_block(&params, transactions);
         assert_rejected_without_state_change(block);
+    }
+
+    #[test]
+    fn rejects_block_exceeding_maximum_serialized_size() {
+        let params = ConsensusParams::default();
+        let mut block = candidate_block(&params, Vec::new());
+        let tx = signed_test_transaction();
+        block.transactions = vec![tx; MAX_TRANSACTIONS_PER_BLOCK];
+
+        let serialized_size = serde_json::to_vec(&block).unwrap().len();
+        assert!(serialized_size > MAX_BLOCK_SIZE_BYTES);
+
+        let mut chain = Chain::default();
+        assert!(validate_block(&block, &chain, &params, NOW).is_err());
+        assert!(chain.blocks.is_empty());
     }
 
     #[test]
