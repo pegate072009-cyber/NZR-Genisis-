@@ -132,7 +132,7 @@ impl Mempool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blockchain::transaction::TxOutput;
+    use crate::blockchain::{state::LedgerState, transaction::TxOutput};
     use ed25519_dalek::SigningKey;
 
     fn funded_chain(key: &SigningKey, amount: u64) -> Chain {
