@@ -10,6 +10,16 @@ use super::{chain::Chain, consensus::ConsensusParams, Block};
 
 const MAX_CHAIN_FILE_BYTES: u64 = 512 * 1024 * 1024;
 const CHAIN_FORMAT_VERSION: u32 = 2;
+
+fn validate_block_count(block_count: usize, max_supply: u64) -> Result<()> {
+    let block_count = u64::try_from(block_count)
+        .map_err(|_| anyhow::anyhow!("stored block count overflow"))?;
+    ensure!(
+        block_count <= max_supply,
+        "stored block count exceeds maximum coin supply"
+    );
+    Ok(())
+}
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -135,6 +145,8 @@ pub fn load_chain(path: &Path, params: &ConsensusParams) -> Result<Chain> {
         "unsupported chain file version"
     );
 
+    validate_block_count(stored.blocks.len(), params.max_supply)?;
+
     let mut chain = Chain::default();
     for block in stored.blocks {
         let timestamp = block.timestamp;
@@ -149,6 +161,12 @@ pub fn load_chain(path: &Path, params: &ConsensusParams) -> Result<Chain> {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn rejects_block_history_longer_than_maximum_supply() {
+        assert!(validate_block_count(30_000_001, 30_000_000).is_err());
+        assert!(validate_block_count(30_000_000, 30_000_000).is_ok());
+    }
 
     #[test]
     fn rejects_missing_chain_file() {
