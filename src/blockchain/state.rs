@@ -288,4 +288,4 @@ mod tests {
         assert!(!state.issued_coin_ids.contains(&coin_id));
         assert_eq!(state.balances.get(&miner), Some(&u64::MAX));
     }
-}                                        
+}            
