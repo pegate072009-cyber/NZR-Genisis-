@@ -3,6 +3,8 @@ use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+pub const MAX_TRANSACTION_OUTPUTS: usize = 100;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TxOutput {
     pub recipient: [u8; 32],
@@ -54,6 +56,10 @@ impl Transaction {
         ensure!(version > 0, "transaction version must be positive");
         ensure!(!outputs.is_empty(), "transaction needs at least one output");
         ensure!(
+            outputs.len() <= MAX_TRANSACTION_OUTPUTS,
+            "transaction contains too many outputs"
+        );
+        ensure!(
             outputs.iter().all(|output| output.amount > 0),
             "transaction outputs must have positive amounts"
         );
@@ -80,6 +86,10 @@ impl Transaction {
         );
         ensure!(self.version > 0, "transaction version must be positive");
         ensure!(!self.outputs.is_empty(), "transaction has no outputs");
+        ensure!(
+            self.outputs.len() <= MAX_TRANSACTION_OUTPUTS,
+            "transaction contains too many outputs"
+        );
         ensure!(
             self.outputs.iter().all(|output| output.amount > 0),
             "transaction outputs must have positive amounts"
@@ -138,6 +148,42 @@ mod tests {
     fn rejects_modified_output() {
         let (_, mut tx) = sample_transaction();
         tx.outputs[0].amount += 1;
+        assert!(tx.verify_signature().is_err());
+    }
+
+    #[test]
+    fn rejects_more_than_protocol_output_limit() {
+        let key = SigningKey::from_bytes(&[8u8; 32]);
+        let outputs = (0..=MAX_TRANSACTION_OUTPUTS)
+            .map(|index| TxOutput {
+                recipient: [index as u8; 32],
+                amount: 1,
+            })
+            .collect();
+
+        assert!(Transaction::sign(2, 0, outputs, &key).is_err());
+    }
+
+    #[test]
+    fn rejects_deserialized_transaction_over_output_limit() {
+        let key = SigningKey::from_bytes(&[9u8; 32]);
+        let mut tx = Transaction::sign(
+            2,
+            0,
+            vec![TxOutput {
+                recipient: [3u8; 32],
+                amount: 1,
+            }],
+            &key,
+        )
+        .unwrap();
+        tx.outputs = (0..=MAX_TRANSACTION_OUTPUTS)
+            .map(|index| TxOutput {
+                recipient: [index as u8; 32],
+                amount: 1,
+            })
+            .collect();
+
         assert!(tx.verify_signature().is_err());
     }
 

@@ -28,6 +28,7 @@ impl Chain {
         params: &ConsensusParams,
         current_time: u64,
     ) -> Result<()> {
+        self.state.verify_invariants()?;
         validate_block(&block, self, params, current_time)?;
 
         let mut candidate_state = self.state.clone();
@@ -155,6 +156,20 @@ mod tests {
     fn verifies_empty_chain() {
         let chain = Chain::default();
         assert!(chain.verify_integrity(&ConsensusParams::default()).is_ok());
+    }
+
+    #[test]
+    fn rejects_block_when_existing_ledger_state_is_corrupted() {
+        let params = ConsensusParams::default();
+        let block = mined_first_block(&params);
+        let mut chain = Chain::default();
+        chain.state.balances.insert([99u8; 32], 1);
+        let before = chain.state.clone();
+
+        assert!(chain.accept_block(block, &params, 1_000_000).is_err());
+        assert!(chain.blocks.is_empty());
+        assert_eq!(chain.state.balances, before.balances);
+        assert_eq!(chain.state.issued_coin_count, before.issued_coin_count);
     }
 
     #[test]

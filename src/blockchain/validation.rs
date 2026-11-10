@@ -1,8 +1,6 @@
-use crate::coin::create_block_reward_id;
 use anyhow::{ensure, Result};
 
-pub const MAX_TRANSACTIONS_PER_BLOCK: usize = 10_000;
-pub const MAX_OUTPUTS_PER_TRANSACTION: usize = 100;
+use crate::coin::create_block_reward_id;
 
 use super::{
     block::Block,
@@ -10,6 +8,9 @@ use super::{
     consensus::{expected_difficulty_bits, ConsensusParams},
     state::LedgerState,
 };
+pub use super::transaction::MAX_TRANSACTION_OUTPUTS as MAX_OUTPUTS_PER_TRANSACTION;
+
+pub const MAX_TRANSACTIONS_PER_BLOCK: usize = 10_000;
 
 fn meets_target(hash: &[u8; 32], difficulty_bits: u16) -> bool {
     let bits = difficulty_bits as usize;
@@ -363,13 +364,22 @@ mod tests {
     fn rejects_transaction_with_too_many_outputs() {
         let params = ConsensusParams::default();
         let key = SigningKey::from_bytes(&[21u8; 32]);
-        let outputs = (0..=MAX_OUTPUTS_PER_TRANSACTION)
+        let mut tx = Transaction::sign(
+            2,
+            0,
+            vec![TxOutput {
+                recipient: [1u8; 32],
+                amount: 1,
+            }],
+            &key,
+        )
+        .unwrap();
+        tx.outputs = (0..=MAX_OUTPUTS_PER_TRANSACTION)
             .map(|index| TxOutput {
                 recipient: [index as u8; 32],
                 amount: 1,
             })
             .collect();
-        let tx = Transaction::sign(2, 0, outputs, &key).unwrap();
         let block = candidate_block(&params, vec![tx]);
         assert_rejected_without_state_change(block);
     }
