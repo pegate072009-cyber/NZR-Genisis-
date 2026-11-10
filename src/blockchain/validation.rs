@@ -11,7 +11,6 @@ use super::{
 };
 
 pub const MAX_TRANSACTIONS_PER_BLOCK: usize = 10_000;
-pub const MAX_BLOCK_SIZE_BYTES: usize = 1_048_576;
 pub const MAX_BLOCK_BYTES: usize = 1_000_000;
 
 fn validate_block_size(block: &Block) -> Result<()> {
@@ -60,12 +59,6 @@ pub fn validate_block(
     current_time: u64,
 ) -> Result<()> {
     params.validate()?;
-
-    let serialized_size = serde_json::to_vec(block)?.len();
-    ensure!(
-        serialized_size <= MAX_BLOCK_SIZE_BYTES,
-        "block exceeds maximum serialized size"
-    );
 
     let expected_height = chain
         .height()
@@ -437,7 +430,7 @@ mod tests {
         block.transactions = vec![tx; MAX_TRANSACTIONS_PER_BLOCK];
 
         let serialized_size = serde_json::to_vec(&block).unwrap().len();
-        assert!(serialized_size > MAX_BLOCK_SIZE_BYTES);
+        assert!(serialized_size > MAX_BLOCK_BYTES);
 
         let mut chain = Chain::default();
         assert!(validate_block(&block, &chain, &params, NOW).is_err());
