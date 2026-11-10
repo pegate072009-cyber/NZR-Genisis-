@@ -131,7 +131,9 @@ pub fn mine_block_parallel(
     let block = found
         .into_inner()
         .map_err(|_| anyhow::anyhow!("mining result lock poisoned"))?
-        .ok_or_else(|| anyhow::anyhow!("nonce attempt limit reached without finding a valid proof of work"))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!("nonce attempt limit reached without finding a valid proof of work")
+        })?;
 
     validate_block(&block, chain, params, current_time)?;
     Ok(block)
