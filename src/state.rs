@@ -87,13 +87,8 @@ mod tests {
             amount: 10,
         };
         let mut state = LedgerStateFile::new(vec![allocation]);
-        let invalid = Transaction::sign(
-            &alice,
-            &hex::encode(bob.verifying_key().to_bytes()),
-            0,
-            20,
-        )
-        .unwrap();
+        let invalid =
+            Transaction::sign(&alice, &hex::encode(bob.verifying_key().to_bytes()), 0, 20).unwrap();
 
         assert!(state.append(invalid).is_err());
         assert!(state.transactions.is_empty());

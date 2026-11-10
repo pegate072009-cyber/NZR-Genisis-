@@ -59,9 +59,12 @@ impl Wallet {
             options.mode(0o600);
         }
 
-        let mut file = options
-            .open(path)
-            .with_context(|| format!("creating wallet key without overwriting: {}", path.display()))?;
+        let mut file = options.open(path).with_context(|| {
+            format!(
+                "creating wallet key without overwriting: {}",
+                path.display()
+            )
+        })?;
         let mut secret = self.signing_key.to_bytes();
         let result = file
             .write_all(&secret)

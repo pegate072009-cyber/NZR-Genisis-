@@ -86,10 +86,7 @@ impl Ledger {
         );
 
         let sender_balance = self.balance(&transaction.sender)?;
-        ensure!(
-            sender_balance >= transaction.amount,
-            "insufficient balance"
-        );
+        ensure!(sender_balance >= transaction.amount, "insufficient balance");
 
         let recipient_balance = self.balance(&transaction.recipient)?;
         let new_recipient_balance = recipient_balance
@@ -123,7 +120,10 @@ impl Ledger {
 
 fn validate_public_key(value: &str) -> Result<()> {
     let bytes = hex::decode(value).context("owner public key must be hexadecimal")?;
-    ensure!(bytes.len() == 32, "owner public key must be exactly 32 bytes");
+    ensure!(
+        bytes.len() == 32,
+        "owner public key must be exactly 32 bytes"
+    );
     let mut key = [0u8; 32];
     key.copy_from_slice(&bytes);
     ed25519_dalek::VerifyingKey::from_bytes(&key)
@@ -190,11 +190,9 @@ mod tests {
     #[test]
     fn rejects_duplicate_genesis_owner_and_excess_supply() {
         let alice = key(1);
-        assert!(Ledger::from_allocations(&[
-            allocation(&alice, 10),
-            allocation(&alice, 10)
-        ])
-        .is_err());
+        assert!(
+            Ledger::from_allocations(&[allocation(&alice, 10), allocation(&alice, 10)]).is_err()
+        );
         assert!(Ledger::from_allocations(&[allocation(&alice, MAX_SUPPLY + 1)]).is_err());
     }
 
