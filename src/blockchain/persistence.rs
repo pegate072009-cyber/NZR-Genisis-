@@ -20,7 +20,8 @@ struct ChainFile {
 }
 
 fn validate_block_count(block_count: usize, max_supply: u64) -> Result<()> {
-    let block_count = u64::try_from(block_count).map_err(|_| anyhow::anyhow!("stored block count overflow"))?;
+    let block_count =
+        u64::try_from(block_count).map_err(|_| anyhow::anyhow!("stored block count overflow"))?;
     ensure!(
         block_count <= max_supply,
         "stored block count exceeds maximum coin supply"
