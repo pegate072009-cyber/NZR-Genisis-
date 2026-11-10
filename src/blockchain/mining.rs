@@ -1,5 +1,7 @@
 use anyhow::{ensure, Result};
 
+use crate::coin::create_block_reward_id;
+
 use super::{
     block::Block,
     chain::Chain,
@@ -9,12 +11,11 @@ use super::{
 };
 
 /// Searches sequential nonces for a block hash with the required number
-/// of leading zero bits. The caller supplies the reward ID from the
-/// project's trusted coin-ID source.
+/// of leading zero bits. The reward ID is derived locally from the
+/// next sequential coin number using the consensus-defined public rule.
 pub fn mine_block(
     chain: &Chain,
     miner_address: [u8; 32],
-    reward_coin_id: [u8; 32],
     transactions: Vec<Transaction>,
     timestamp: u64,
     current_time: u64,
@@ -36,6 +37,11 @@ pub fn mine_block(
         .issued_coin_count
         .checked_add(1)
         .ok_or_else(|| anyhow::anyhow!("reward coin number overflow"))?;
+    ensure!(
+        reward_coin_number <= params.max_supply,
+        "maximum supply exceeded"
+    );
+    let reward_coin_id = create_block_reward_id(reward_coin_number);
     let difficulty_bits = expected_difficulty_bits(chain, height, params)?;
 
     let mut block = Block {
@@ -55,7 +61,7 @@ pub fn mine_block(
 
     for _ in 0..max_nonce_attempts {
         if meets_target(&block.hash(), difficulty_bits) {
-            validate_block(&block, chain, reward_coin_id, params, current_time)?;
+            validate_block(&block, chain, params, current_time)?;
             return Ok(block);
         }
 
@@ -119,7 +125,6 @@ mod tests {
         let block = mine_block(
             &chain,
             [7u8; 32],
-            [9u8; 32],
             Vec::new(),
             1_000_000,
             1_000_000,
@@ -130,7 +135,7 @@ mod tests {
 
         assert_eq!(block.height, 1);
         assert!(meets_target(&block.hash(), params.initial_difficulty_bits));
-        validate_block(&block, &chain, [9u8; 32], &params, 1_000_000).unwrap();
+        validate_block(&block, &chain, &params, 1_000_000).unwrap();
     }
 
     #[test]
@@ -145,7 +150,6 @@ mod tests {
         let result = mine_block(
             &chain,
             [7u8; 32],
-            [9u8; 32],
             Vec::new(),
             1_000_000,
             1_000_000,

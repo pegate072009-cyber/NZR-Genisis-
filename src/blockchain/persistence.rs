@@ -8,7 +8,7 @@ use std::{
 use super::{chain::Chain, consensus::ConsensusParams, Block};
 
 const MAX_CHAIN_FILE_BYTES: u64 = 512 * 1024 * 1024;
-const CHAIN_FORMAT_VERSION: u32 = 1;
+const CHAIN_FORMAT_VERSION: u32 = 2;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct ChainFile {
@@ -107,9 +107,8 @@ pub fn load_chain(path: &Path, params: &ConsensusParams) -> Result<Chain> {
 
     let mut chain = Chain::default();
     for block in stored.blocks {
-        let reward_id = block.reward_coin_id;
         let timestamp = block.timestamp;
-        chain.accept_block(block, reward_id, params, timestamp)?;
+        chain.accept_block(block, params, timestamp)?;
     }
 
     chain.verify_integrity(params)?;

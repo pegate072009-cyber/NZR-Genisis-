@@ -1,6 +1,8 @@
 use anyhow::{ensure, Result};
 use std::collections::HashSet;
 
+use crate::coin::create_block_reward_id;
+
 use super::{
     block::Block,
     chain::Chain,
@@ -41,7 +43,6 @@ fn median_timestamp(chain: &Chain) -> u64 {
 pub fn validate_block(
     block: &Block,
     chain: &Chain,
-    expected_reward_coin_id: [u8; 32],
     params: &ConsensusParams,
     current_time: u64,
 ) -> Result<()> {
@@ -77,8 +78,8 @@ pub fn validate_block(
         "maximum supply exceeded"
     );
     ensure!(
-        block.reward_coin_id == expected_reward_coin_id,
-        "incorrect reward coin identifier"
+        block.reward_coin_id == create_block_reward_id(expected_coin_number),
+        "incorrect deterministic reward coin identifier"
     );
     ensure!(
         !chain.state.issued_coin_ids.contains(&block.reward_coin_id),
@@ -155,18 +156,14 @@ mod tests {
 
     const NOW: u64 = 1_000_000;
 
-    fn candidate_block(
-        params: &ConsensusParams,
-        reward_id: [u8; 32],
-        transactions: Vec<Transaction>,
-    ) -> Block {
+    fn candidate_block(params: &ConsensusParams, transactions: Vec<Transaction>) -> Block {
         let mut block = Block {
             version: params.protocol_version,
             height: 1,
             previous_hash: [0u8; 32],
             timestamp: NOW,
             reward_coin_number: 1,
-            reward_coin_id: reward_id,
+            reward_coin_id: crate::coin::create_block_reward_id(1),
             miner_address: [7u8; 32],
             transactions,
             transaction_root: [0u8; 32],
@@ -197,14 +194,12 @@ mod tests {
         .unwrap()
     }
 
-    fn assert_rejected_without_state_change(block: Block, expected_reward_id: [u8; 32]) {
+    fn assert_rejected_without_state_change(block: Block) {
         let params = ConsensusParams::default();
         let mut chain = Chain::default();
         let before = chain.state.clone();
 
-        assert!(chain
-            .accept_block(block, expected_reward_id, &params, NOW)
-            .is_err());
+        assert!(chain.accept_block(block, &params, NOW).is_err());
         assert_eq!(chain.state.balances, before.balances);
         assert_eq!(chain.state.next_nonce, before.next_nonce);
         assert_eq!(chain.state.issued_coin_ids, before.issued_coin_ids);
@@ -215,12 +210,12 @@ mod tests {
     #[test]
     fn accepts_valid_mined_block_and_issues_one_reward() {
         let params = ConsensusParams::default();
-        let reward_id = [3u8; 32];
+        let reward_id = crate::coin::create_block_reward_id(1);
         let miner = [7u8; 32];
-        let block = candidate_block(&params, reward_id, Vec::new());
+        let block = candidate_block(&params, Vec::new());
         let mut chain = Chain::default();
 
-        chain.accept_block(block, reward_id, &params, NOW).unwrap();
+        chain.accept_block(block, &params, NOW).unwrap();
 
         assert_eq!(chain.height(), 1);
         assert_eq!(chain.state.issued_coin_count, 1);
@@ -231,102 +226,87 @@ mod tests {
     #[test]
     fn rejects_wrong_protocol_version_without_state_change() {
         let params = ConsensusParams::default();
-        let reward_id = [4u8; 32];
-        let mut block = candidate_block(&params, reward_id, Vec::new());
+        let mut block = candidate_block(&params, Vec::new());
         block.version = 1;
-        assert_rejected_without_state_change(block, reward_id);
+        assert_rejected_without_state_change(block);
     }
 
     #[test]
     fn rejects_wrong_height_without_state_change() {
         let params = ConsensusParams::default();
-        let reward_id = [5u8; 32];
-        let mut block = candidate_block(&params, reward_id, Vec::new());
+        let mut block = candidate_block(&params, Vec::new());
         block.height = 2;
-        assert_rejected_without_state_change(block, reward_id);
+        assert_rejected_without_state_change(block);
     }
 
     #[test]
     fn rejects_wrong_previous_hash_without_state_change() {
         let params = ConsensusParams::default();
-        let reward_id = [6u8; 32];
-        let mut block = candidate_block(&params, reward_id, Vec::new());
+        let mut block = candidate_block(&params, Vec::new());
         block.previous_hash = [9u8; 32];
-        assert_rejected_without_state_change(block, reward_id);
+        assert_rejected_without_state_change(block);
     }
 
     #[test]
     fn rejects_wrong_reward_number_without_state_change() {
         let params = ConsensusParams::default();
-        let reward_id = [10u8; 32];
-        let mut block = candidate_block(&params, reward_id, Vec::new());
+        let mut block = candidate_block(&params, Vec::new());
         block.reward_coin_number = 2;
-        assert_rejected_without_state_change(block, reward_id);
+        assert_rejected_without_state_change(block);
     }
 
     #[test]
     fn rejects_wrong_reward_id_without_state_change() {
         let params = ConsensusParams::default();
-        let reward_id = [11u8; 32];
-        let mut block = candidate_block(&params, reward_id, Vec::new());
+        let mut block = candidate_block(&params, Vec::new());
         block.reward_coin_id = [12u8; 32];
-        assert_rejected_without_state_change(block, reward_id);
+        assert_rejected_without_state_change(block);
     }
 
     #[test]
     fn rejects_future_timestamp_without_state_change() {
         let params = ConsensusParams::default();
-        let reward_id = [13u8; 32];
-        let mut block = candidate_block(&params, reward_id, Vec::new());
+        let mut block = candidate_block(&params, Vec::new());
         block.timestamp = NOW + params.max_future_drift_secs + 1;
-        assert_rejected_without_state_change(block, reward_id);
+        assert_rejected_without_state_change(block);
     }
 
     #[test]
     fn rejects_modified_transaction_root_without_state_change() {
         let params = ConsensusParams::default();
-        let reward_id = [14u8; 32];
-        let mut block = candidate_block(&params, reward_id, Vec::new());
+        let mut block = candidate_block(&params, Vec::new());
         block.transaction_root = [15u8; 32];
-        assert_rejected_without_state_change(block, reward_id);
+        assert_rejected_without_state_change(block);
     }
 
     #[test]
     fn rejects_duplicate_transaction_without_state_change() {
         let params = ConsensusParams::default();
-        let reward_id = [16u8; 32];
         let tx = signed_test_transaction();
-        let block = candidate_block(&params, reward_id, vec![tx.clone(), tx]);
-        assert_rejected_without_state_change(block, reward_id);
+        let block = candidate_block(&params, vec![tx.clone(), tx]);
+        assert_rejected_without_state_change(block);
     }
 
     #[test]
     fn rejects_invalid_transaction_signature_without_state_change() {
         let params = ConsensusParams::default();
-        let reward_id = [17u8; 32];
         let mut tx = signed_test_transaction();
         tx.signature[0] ^= 0x01;
-        let block = candidate_block(&params, reward_id, vec![tx]);
-        assert_rejected_without_state_change(block, reward_id);
+        let block = candidate_block(&params, vec![tx]);
+        assert_rejected_without_state_change(block);
     }
 
     #[test]
     fn rejects_wrong_difficulty_without_state_change() {
         let params = ConsensusParams::default();
-        let reward_id = [18u8; 32];
-        let mut block = candidate_block(&params, reward_id, Vec::new());
+        let mut block = candidate_block(&params, Vec::new());
         block.difficulty_bits = params.initial_difficulty_bits + 1;
-        assert_rejected_without_state_change(block, reward_id);
+        assert_rejected_without_state_change(block);
     }
 
     #[test]
     fn apply_block_transactions_is_atomic_on_failed_transaction() {
-        let reward_id = [20u8; 32];
-        let block = candidate_block(
-            &ConsensusParams::default(),
-            reward_id,
-            vec![signed_test_transaction()],
-        );
+        let block = candidate_block(&ConsensusParams::default(), vec![signed_test_transaction()]);
         let mut state = LedgerState::default();
         let before = state.clone();
 

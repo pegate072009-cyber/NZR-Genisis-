@@ -25,11 +25,10 @@ impl Chain {
     pub fn accept_block(
         &mut self,
         block: Block,
-        expected_reward_coin_id: [u8; 32],
         params: &ConsensusParams,
         current_time: u64,
     ) -> Result<()> {
-        validate_block(&block, self, expected_reward_coin_id, params, current_time)?;
+        validate_block(&block, self, params, current_time)?;
 
         let mut candidate_state = self.state.clone();
 
@@ -54,10 +53,8 @@ impl Chain {
     /// Replays every stored block from an empty ledger and checks that the
     /// resulting ledger matches the state currently stored in this Chain.
     ///
-    /// This detects accidental or unauthorized changes to stored block data
-    /// and ledger state. It does not independently prove that reward IDs were
-    /// derived from an external, trusted coin-ID registry: this implementation
-    /// uses each block's recorded reward_coin_id as the expected ID.
+    /// Reward identifiers are independently re-derived from the sequential
+    /// reward number during replay; stored IDs are never trusted as inputs.
     pub fn verify_integrity(&self, params: &ConsensusParams) -> Result<()> {
         params.validate()?;
 
@@ -76,7 +73,7 @@ impl Chain {
             // The block's own timestamp is used as the validation clock.
             // This checks chain-internal timestamp rules without depending on
             // the machine's current wall clock.
-            replayed.accept_block(block.clone(), block.reward_coin_id, params, block.timestamp)?;
+            replayed.accept_block(block.clone(), params, block.timestamp)?;
         }
 
         ensure!(
@@ -107,16 +104,19 @@ impl Chain {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blockchain::{block::Block, consensus::ConsensusParams};
+    use crate::{
+        blockchain::{block::Block, consensus::ConsensusParams},
+        coin::create_block_reward_id,
+    };
 
-    fn mined_first_block(params: &ConsensusParams, reward_id: [u8; 32]) -> Block {
+    fn mined_first_block(params: &ConsensusParams) -> Block {
         let mut block = Block {
             version: params.protocol_version,
             height: 1,
             previous_hash: [0u8; 32],
             timestamp: 1_000_000,
             reward_coin_number: 1,
-            reward_coin_id: reward_id,
+            reward_coin_id: create_block_reward_id(1),
             miner_address: [7u8; 32],
             transactions: Vec::new(),
             transaction_root: [0u8; 32],
@@ -158,13 +158,10 @@ mod tests {
     #[test]
     fn verifies_valid_first_block() {
         let params = ConsensusParams::default();
-        let reward_id = [3u8; 32];
-        let block = mined_first_block(&params, reward_id);
+        let block = mined_first_block(&params);
         let mut chain = Chain::default();
 
-        chain
-            .accept_block(block, reward_id, &params, 1_000_000)
-            .unwrap();
+        chain.accept_block(block, &params, 1_000_000).unwrap();
 
         assert!(chain.verify_integrity(&params).is_ok());
     }
@@ -172,13 +169,10 @@ mod tests {
     #[test]
     fn detects_modified_stored_balance() {
         let params = ConsensusParams::default();
-        let reward_id = [4u8; 32];
-        let block = mined_first_block(&params, reward_id);
+        let block = mined_first_block(&params);
         let mut chain = Chain::default();
 
-        chain
-            .accept_block(block, reward_id, &params, 1_000_000)
-            .unwrap();
+        chain.accept_block(block, &params, 1_000_000).unwrap();
 
         chain.state.balances.insert([7u8; 32], 999);
 
@@ -188,13 +182,10 @@ mod tests {
     #[test]
     fn detects_modified_block_data() {
         let params = ConsensusParams::default();
-        let reward_id = [5u8; 32];
-        let block = mined_first_block(&params, reward_id);
+        let block = mined_first_block(&params);
         let mut chain = Chain::default();
 
-        chain
-            .accept_block(block, reward_id, &params, 1_000_000)
-            .unwrap();
+        chain.accept_block(block, &params, 1_000_000).unwrap();
 
         chain.blocks[0].timestamp += 1;
 
