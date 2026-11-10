@@ -119,9 +119,7 @@ fn rejects_persisted_chain_with_modified_block_data() {
 
     let bytes = std::fs::read(&chain_path).unwrap();
     let mut document: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-    let timestamp = document["blocks"][0]["timestamp"]
-        .as_u64()
-        .unwrap();
+    let timestamp = document["blocks"][0]["timestamp"].as_u64().unwrap();
     document["blocks"][0]["timestamp"] = serde_json::json!(timestamp + 1);
     let tampered = serde_json::to_vec(&document).unwrap();
     std::fs::write(&chain_path, tampered).unwrap();
