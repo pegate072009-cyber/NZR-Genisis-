@@ -22,8 +22,7 @@ fn mined_block_is_accepted_saved_and_reloaded() {
     let miner = [0x17u8; 32];
     let now = 1_800_000_000u64;
 
-    let block = mine_block(&chain, miner, Vec::new(), now, now, 100_000, &params)
-    .unwrap();
+    let block = mine_block(&chain, miner, Vec::new(), now, now, 100_000, &params).unwrap();
 
     chain.accept_block(block, &params, now).unwrap();
 

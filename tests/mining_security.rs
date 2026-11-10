@@ -66,7 +66,10 @@ fn rejects_forged_or_reused_reward_identifier_without_changing_chain() {
     assert_eq!(chain.tip_hash(), previous_tip);
     assert_eq!(chain.state.balances, previous_state.balances);
     assert_eq!(chain.state.issued_coin_ids, previous_state.issued_coin_ids);
-    assert_eq!(chain.state.issued_coin_count, previous_state.issued_coin_count);
+    assert_eq!(
+        chain.state.issued_coin_count,
+        previous_state.issued_coin_count
+    );
 }
 
 #[test]
