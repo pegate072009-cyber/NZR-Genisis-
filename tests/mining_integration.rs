@@ -39,9 +39,7 @@ fn mined_block_is_accepted_saved_and_reloaded() {
     )
     .unwrap();
 
-    chain
-        .accept_block(block, reward_id, &params, now)
-        .unwrap();
+    chain.accept_block(block, reward_id, &params, now).unwrap();
 
     assert_eq!(chain.height(), 1);
     assert_eq!(chain.state.issued_coin_count, 1);
