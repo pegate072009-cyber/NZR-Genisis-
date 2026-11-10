@@ -63,7 +63,9 @@ impl<'de> Deserialize<'de> for FileEntry {
         if wire.last_slot < wire.first_slot {
             return Err(D::Error::custom("last_slot must not precede first_slot"));
         }
-        let range_count = wire.last_slot.checked_sub(wire.first_slot)
+        let range_count = wire
+            .last_slot
+            .checked_sub(wire.first_slot)
             .and_then(|n| n.checked_add(1))
             .ok_or_else(|| D::Error::custom("file slot range overflows"))?;
         if range_count != u64::from(wire.coin_records) {
@@ -96,7 +98,9 @@ impl<'de> Deserialize<'de> for Manifest {
             return Err(D::Error::custom("wrong ticker"));
         }
         if wire.inventory_domain_supply == 0 || wire.inventory_domain_supply > MAX_SUPPLY {
-            return Err(D::Error::custom("inventory domain is outside allowed supply bounds"));
+            return Err(D::Error::custom(
+                "inventory domain is outside allowed supply bounds",
+            ));
         }
         if wire.total_coin_records != wire.inventory_domain_supply {
             return Err(D::Error::custom("manifest total and inventory domain mismatch"));
@@ -104,9 +108,11 @@ impl<'de> Deserialize<'de> for Manifest {
         match wire.network.as_str() {
             TEST_NETWORK_NAME => {}
             NETWORK_NAME if wire.inventory_domain_supply == MAX_SUPPLY => {}
-            NETWORK_NAME => return Err(D::Error::custom(
-                "production inventory must cover the full maximum supply",
-            )),
+            NETWORK_NAME => {
+                return Err(D::Error::custom(
+                    "production inventory must cover the full maximum supply",
+                ))
+            }
             _ => return Err(D::Error::custom("unrecognized Nezora network in manifest")),
         }
         ensure_lower_hex::<D::Error>(&wire.inventory_seed, 64, "inventory_seed")?;
@@ -119,7 +125,8 @@ impl<'de> Deserialize<'de> for Manifest {
             let expected_name = format!("block.{:02}.enc", index + 1);
             if entry.file != expected_name {
                 return Err(D::Error::custom(format!(
-                    "unexpected inventory filename: {}", entry.file
+                    "unexpected inventory filename: {}",
+                    entry.file
                 )));
             }
             if entry.first_slot != expected_first_slot {
@@ -128,9 +135,13 @@ impl<'de> Deserialize<'de> for Manifest {
                 ));
             }
             if entry.last_slot >= wire.inventory_domain_supply {
-                return Err(D::Error::custom("inventory slot range exceeds declared domain"));
+                return Err(D::Error::custom(
+                    "inventory slot range exceeds declared domain",
+                ));
             }
-            expected_first_slot = entry.last_slot.checked_add(1)
+            expected_first_slot = entry
+                .last_slot
+                .checked_add(1)
                 .ok_or_else(|| D::Error::custom("inventory slot range overflows"))?;
         }
         if expected_first_slot != wire.inventory_domain_supply {
@@ -153,7 +164,9 @@ impl<'de> Deserialize<'de> for Manifest {
 
 fn ensure_lower_hex<E: DeError>(value: &str, expected_len: usize, field: &str) -> Result<(), E> {
     if value.len() != expected_len
-        || !value.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        || !value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
     {
         return Err(E::custom(format!(
             "{field} must be {expected_len} lowercase hexadecimal characters"
@@ -228,14 +241,12 @@ mod tests {
 
     #[test]
     fn rejects_invalid_slot_ranges_and_record_counts() {
-        let bad_count = valid_manifest_json().replace(
-            r#""coin_records": 2"#, r#""coin_records": 1"#
-        );
+        let bad_count =
+            valid_manifest_json().replace(r#""coin_records": 2"#, r#""coin_records": 1"#);
         assert!(serde_json::from_str::<Manifest>(&bad_count).is_err());
 
-        let out_of_domain = valid_manifest_json().replace(
-            r#""last_slot": 1"#, r#""last_slot": 2"#
-        );
+        let out_of_domain =
+            valid_manifest_json().replace(r#""last_slot": 1"#, r#""last_slot": 2"#);
         assert!(serde_json::from_str::<Manifest>(&out_of_domain).is_err());
     }
 
