@@ -8,8 +8,8 @@ use super::{
 };
 
 fn validate_chain_length(block_count: usize, max_supply: u64) -> Result<()> {
-    let block_count = u64::try_from(block_count)
-        .map_err(|_| anyhow::anyhow!("stored block count overflow"))?;
+    let block_count =
+        u64::try_from(block_count).map_err(|_| anyhow::anyhow!("stored block count overflow"))?;
     ensure!(
         block_count <= max_supply,
         "stored block count exceeds maximum coin supply"
@@ -69,8 +69,8 @@ impl Chain {
         let mut replayed = Chain::default();
 
         for (index, block) in self.blocks.iter().enumerate() {
-            let index = u64::try_from(index)
-                .map_err(|_| anyhow::anyhow!("block index overflow"))?;
+            let index =
+                u64::try_from(index).map_err(|_| anyhow::anyhow!("block index overflow"))?;
             let expected_height = index
                 .checked_add(1)
                 .ok_or_else(|| anyhow::anyhow!("block height overflow"))?;
