@@ -10,16 +10,6 @@ use super::{chain::Chain, consensus::ConsensusParams, Block};
 
 const MAX_CHAIN_FILE_BYTES: u64 = 512 * 1024 * 1024;
 const CHAIN_FORMAT_VERSION: u32 = 2;
-
-fn validate_block_count(block_count: usize, max_supply: u64) -> Result<()> {
-    let block_count = u64::try_from(block_count)
-        .map_err(|_| anyhow::anyhow!("stored block count overflow"))?;
-    ensure!(
-        block_count <= max_supply,
-        "stored block count exceeds maximum coin supply"
-    );
-    Ok(())
-}
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -27,6 +17,15 @@ static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 struct ChainFile {
     format_version: u32,
     blocks: Vec<Block>,
+}
+
+fn validate_block_count(block_count: usize, max_supply: u64) -> Result<()> {
+    let block_count = u64::try_from(block_count).map_err(|_| anyhow::anyhow!("stored block count overflow"))?;
+    ensure!(
+        block_count <= max_supply,
+        "stored block count exceeds maximum coin supply"
+    );
+    Ok(())
 }
 
 fn temporary_path(path: &Path, attempt: u64) -> Result<PathBuf> {
