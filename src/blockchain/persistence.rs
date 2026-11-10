@@ -160,7 +160,78 @@ pub fn load_chain(path: &Path, params: &ConsensusParams) -> Result<Chain> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        blockchain::{block::Block, consensus::ConsensusParams},
+        coin::create_block_reward_id,
+    };
     use tempfile::tempdir;
+
+    fn meets_target(hash: &[u8; 32], difficulty_bits: u16) -> bool {
+        let bits = difficulty_bits as usize;
+        if bits > 255 {
+            return false;
+        }
+        let full_bytes = bits / 8;
+        let remaining_bits = bits % 8;
+        if hash[..full_bytes].iter().any(|byte| *byte != 0) {
+            return false;
+        }
+        remaining_bits == 0 || hash[full_bytes] >> (8 - remaining_bits) == 0
+    }
+
+    fn valid_one_block_chain(params: &ConsensusParams) -> Chain {
+        let mut block = Block {
+            version: params.protocol_version,
+            height: 1,
+            previous_hash: [0u8; 32],
+            timestamp: 1_000_000,
+            reward_coin_number: 1,
+            reward_coin_id: create_block_reward_id(1),
+            miner_address: [7u8; 32],
+            transactions: Vec::new(),
+            transaction_root: [0u8; 32],
+            nonce: 0,
+            difficulty_bits: params.initial_difficulty_bits,
+        };
+        block.transaction_root = block.calculate_transaction_root();
+        while !meets_target(&block.hash(), block.difficulty_bits) {
+            block.nonce = block.nonce.checked_add(1).unwrap();
+        }
+
+        let mut chain = Chain::default();
+        chain.accept_block(block, params, 1_000_000).unwrap();
+        chain
+    }
+
+    #[test]
+    fn round_trips_valid_chain_and_reconstructs_ledger() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("chain.json");
+        let params = ConsensusParams::default();
+        let original = valid_one_block_chain(&params);
+
+        save_chain(&path, &original, &params).unwrap();
+        let loaded = load_chain(&path, &params).unwrap();
+
+        assert_eq!(loaded.blocks, original.blocks);
+        assert_eq!(loaded.state.balances, original.state.balances);
+        assert_eq!(loaded.state.next_nonce, original.state.next_nonce);
+        assert_eq!(loaded.state.issued_coin_ids, original.state.issued_coin_ids);
+        assert_eq!(loaded.state.issued_coin_count, original.state.issued_coin_count);
+        assert!(loaded.verify_integrity(&params).is_ok());
+    }
+
+    #[test]
+    fn refuses_to_save_corrupted_ledger_state() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("chain.json");
+        let params = ConsensusParams::default();
+        let mut chain = valid_one_block_chain(&params);
+        chain.state.balances.insert([99u8; 32], 1);
+
+        assert!(save_chain(&path, &chain, &params).is_err());
+        assert!(!path.exists());
+    }
 
     #[test]
     fn rejects_block_history_longer_than_maximum_supply() {
@@ -187,6 +258,15 @@ mod tests {
             br#"{"format_version":2,"blocks":[],"unexpected":true}"#,
         )
         .unwrap();
+
+        assert!(load_chain(&path, &ConsensusParams::default()).is_err());
+    }
+
+    #[test]
+    fn rejects_unsupported_chain_file_version() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("chain.json");
+        fs::write(&path, br#"{"format_version":999,"blocks":[]}"#).unwrap();
 
         assert!(load_chain(&path, &ConsensusParams::default()).is_err());
     }
