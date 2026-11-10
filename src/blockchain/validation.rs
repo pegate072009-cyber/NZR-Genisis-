@@ -2,13 +2,13 @@ use anyhow::{ensure, Result};
 
 use crate::coin::create_block_reward_id;
 
+pub use super::transaction::MAX_TRANSACTION_OUTPUTS as MAX_OUTPUTS_PER_TRANSACTION;
 use super::{
     block::Block,
     chain::Chain,
     consensus::{expected_difficulty_bits, ConsensusParams},
     state::LedgerState,
 };
-pub use super::transaction::MAX_TRANSACTION_OUTPUTS as MAX_OUTPUTS_PER_TRANSACTION;
 
 pub const MAX_TRANSACTIONS_PER_BLOCK: usize = 10_000;
 
