@@ -27,13 +27,10 @@ impl LedgerState {
             "issued coin ID set does not match issued coin count"
         );
 
-        let total_balances = self
-            .balances
-            .values()
-            .try_fold(0u128, |sum, balance| {
-                sum.checked_add(u128::from(*balance))
-                    .ok_or_else(|| anyhow::anyhow!("ledger balance total overflow"))
-            })?;
+        let total_balances = self.balances.values().try_fold(0u128, |sum, balance| {
+            sum.checked_add(u128::from(*balance))
+                .ok_or_else(|| anyhow::anyhow!("ledger balance total overflow"))
+        })?;
         ensure!(
             total_balances == u128::from(self.issued_coin_count),
             "total account balances do not match issued supply"
@@ -253,7 +250,9 @@ mod tests {
     #[test]
     fn verifies_consistent_ledger_accounting() {
         let mut state = LedgerState::default();
-        state.issue_sequential_coin(1, [51u8; 32], [52u8; 32]).unwrap();
+        state
+            .issue_sequential_coin(1, [51u8; 32], [52u8; 32])
+            .unwrap();
 
         assert!(state.verify_invariants().is_ok());
     }
@@ -261,7 +260,9 @@ mod tests {
     #[test]
     fn rejects_balance_total_that_differs_from_issued_supply() {
         let mut state = LedgerState::default();
-        state.issue_sequential_coin(1, [53u8; 32], [54u8; 32]).unwrap();
+        state
+            .issue_sequential_coin(1, [53u8; 32], [54u8; 32])
+            .unwrap();
         state.balances.insert([55u8; 32], 1);
 
         assert!(state.verify_invariants().is_err());
@@ -287,4 +288,4 @@ mod tests {
         assert!(!state.issued_coin_ids.contains(&coin_id));
         assert_eq!(state.balances.get(&miner), Some(&u64::MAX));
     }
-}
+}                                        
