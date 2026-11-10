@@ -16,10 +16,7 @@ use std::{
 };
 
 #[derive(Debug, Parser)]
-#[command(
-    name = "nezora-mine",
-    about = "Mine one Nezora local-testnet block"
-)]
+#[command(name = "nezora-mine", about = "Mine one Nezora local-testnet block")]
 struct Args {
     /// Existing Nezora wallet private-key file (32 raw bytes).
     #[arg(long, default_value = "private/miner.key")]
@@ -65,7 +62,10 @@ fn run() -> Result<()> {
 
     let wallet = Wallet::load_private_key(&args.wallet_key)?;
     let miner_address_vec = hex::decode(wallet.public_key_hex())?;
-    ensure!(miner_address_vec.len() == 32, "wallet public key has invalid length");
+    ensure!(
+        miner_address_vec.len() == 32,
+        "wallet public key has invalid length"
+    );
     let mut miner_address = [0u8; 32];
     miner_address.copy_from_slice(&miner_address_vec);
 
