@@ -67,10 +67,7 @@ impl LedgerState {
             coin_number == expected_number,
             "reward coin must be the next sequential number"
         );
-        ensure!(
-            coin_number <= NEZORA_MAX_SUPPLY,
-            "maximum supply exceeded"
-        );
+        ensure!(coin_number <= NEZORA_MAX_SUPPLY, "maximum supply exceeded");
         ensure!(
             !self.issued_coin_ids.contains(&coin_id),
             "coin already issued"
