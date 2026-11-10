@@ -2,6 +2,18 @@ use anyhow::{ensure, Result};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 
+/// Derive the public identifier for a sequential block reward.
+/// This is consensus data and must be independently reproducible by every node.
+pub fn create_block_reward_id(coin_number: u64) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(b"NEZORA-BLOCK-REWARD-V1");
+    hasher.update(coin_number.to_be_bytes());
+    let digest = hasher.finalize();
+    let mut id = [0u8; 32];
+    id.copy_from_slice(&digest);
+    id
+}
+
 pub fn create_coin_record(number: u64) -> String {
     create_coin_record_with_seed(&[0u8; 32], number)
 }
@@ -107,6 +119,18 @@ mod tests {
     use super::*;
 
     const TEST_SEED: [u8; 32] = [0x5Au8; 32];
+
+    #[test]
+    fn block_reward_ids_are_deterministic_and_number_specific() {
+        assert_eq!(create_block_reward_id(1), create_block_reward_id(1));
+        assert_ne!(create_block_reward_id(1), create_block_reward_id(2));
+    }
+
+    #[test]
+    fn block_reward_id_is_domain_separated_from_inventory_ids() {
+        let inventory_id = hex::decode(create_coin_record_with_seed(&TEST_SEED, 1)).unwrap();
+        assert_ne!(create_block_reward_id(1).as_slice(), inventory_id.as_slice());
+    }
 
     #[test]
     fn validates_generated_seeded_records() {
