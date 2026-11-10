@@ -245,13 +245,11 @@ mod tests {
     #[test]
     fn rejects_missing_chain_file() {
         let dir = tempdir().unwrap();
-        assert!(
-            load_chain(
-                &dir.path().join("missing.json"),
-                &ConsensusParams::default()
-            )
-            .is_err()
-        );
+        assert!(load_chain(
+            &dir.path().join("missing.json"),
+            &ConsensusParams::default()
+        )
+        .is_err());
     }
 
     #[test]
