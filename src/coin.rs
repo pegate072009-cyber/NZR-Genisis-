@@ -129,7 +129,10 @@ mod tests {
     #[test]
     fn block_reward_id_is_domain_separated_from_inventory_ids() {
         let inventory_id = hex::decode(create_coin_record_with_seed(&TEST_SEED, 1)).unwrap();
-        assert_ne!(create_block_reward_id(1).as_slice(), inventory_id.as_slice());
+        assert_ne!(
+            create_block_reward_id(1).as_slice(),
+            inventory_id.as_slice()
+        );
     }
 
     #[test]
