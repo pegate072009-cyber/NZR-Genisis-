@@ -45,7 +45,10 @@ impl LedgerStore {
             .with_context(|| format!("validating ledger file {}", self.path.display()))
     }
 
-    pub fn load_or_create(&self, allocations: Vec<crate::ledger::Allocation>) -> Result<LedgerStateFile> {
+    pub fn load_or_create(
+        &self,
+        allocations: Vec<crate::ledger::Allocation>,
+    ) -> Result<LedgerStateFile> {
         if self.path.exists() {
             return self.load();
         }
@@ -100,10 +103,7 @@ impl LedgerStore {
         if let Err(error) = fs::rename(&temp_path, &self.path) {
             let _ = fs::remove_file(&temp_path);
             return Err(error).with_context(|| {
-                format!(
-                    "atomically replacing ledger file {}",
-                    self.path.display()
-                )
+                format!("atomically replacing ledger file {}", self.path.display())
             });
         }
 
