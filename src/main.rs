@@ -10,13 +10,14 @@ use std::{
 
 use nezora_supply::{
     crypto::{read_public_key, sha256_hex},
+    query::LedgerQueries,
     storage::{generate_supply_for_network, verify_supply},
 };
 
 const MAX_PINNED_MANIFEST_BYTES: u64 = 1_048_576;
 
 #[derive(Parser)]
-#[command(name = "nezora", version, about = "Nezora (NZR) Genesis Supply Tool")]
+#[command(name = "nezora", version, about = "Nezora (NZR) Genesis and Ledger Tool")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -73,6 +74,32 @@ enum Command {
         #[arg(long, default_value = "public/public.key")]
         public_key: PathBuf,
     },
+    /// Prints total supply and ledger activity from an existing persisted ledger.
+    LedgerInfo {
+        #[arg(long, default_value = "data/ledger.json")]
+        db: PathBuf,
+    },
+    /// Prints the balance and next transaction nonce for an address.
+    Balance {
+        #[arg(long)]
+        address: String,
+        #[arg(long, default_value = "data/ledger.json")]
+        db: PathBuf,
+    },
+    /// Prints the latest transaction history entries.
+    History {
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        #[arg(long, default_value = "data/ledger.json")]
+        db: PathBuf,
+    },
+    /// Looks up one transaction by its 64-character transaction ID.
+    Transaction {
+        #[arg(long)]
+        id: String,
+        #[arg(long, default_value = "data/ledger.json")]
+        db: PathBuf,
+    },
 }
 
 fn validate_sha256_hex(value: &str, label: &str) -> Result<String> {
@@ -113,7 +140,6 @@ fn calculate_release_pins(dir: &Path, public_key_path: &Path) -> Result<(String,
 }
 
 fn verified_release_pins(dir: &Path, public_key_path: &Path) -> Result<(String, String)> {
-    // Never issue release pins for an inventory whose manifest signature or file checksums fail.
     verify_supply(dir, public_key_path, None)?;
     calculate_release_pins(dir, public_key_path)
 }
@@ -235,6 +261,11 @@ fn init_keys(dir: &Path) -> Result<()> {
     Ok(())
 }
 
+fn print_json<T: serde::Serialize>(value: &T) -> Result<()> {
+    println!("{}", serde_json::to_string_pretty(value)?);
+    Ok(())
+}
+
 fn main() -> Result<()> {
     match Cli::parse().command {
         Command::InitKeys { dir } => init_keys(&dir)?,
@@ -282,6 +313,21 @@ fn main() -> Result<()> {
             println!("manifest_sha256={manifest_hash}");
             println!("public_key_sha256={public_key_hash}");
             println!("Publish both values through an independently trusted channel.");
+        }
+        Command::LedgerInfo { db } => {
+            print_json(&LedgerQueries::new(db).ledger_summary()?)?;
+        }
+        Command::Balance { address, db } => {
+            print_json(&LedgerQueries::new(db).account(&address)?)?;
+        }
+        Command::History { limit, db } => {
+            print_json(&LedgerQueries::new(db).history(limit)?)?;
+        }
+        Command::Transaction { id, db } => {
+            match LedgerQueries::new(db).transaction(&id)? {
+                Some(entry) => print_json(&entry)?,
+                None => anyhow::bail!("transaction not found"),
+            }
         }
     }
     Ok(())

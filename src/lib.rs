@@ -5,6 +5,7 @@ pub mod inventory;
 pub mod ledger;
 pub mod manifest;
 pub mod persistence;
+pub mod query;
 pub mod state;
 pub mod storage;
 pub mod transaction;
