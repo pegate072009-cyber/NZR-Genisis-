@@ -1,5 +1,5 @@
-use anyhow::{ensure, Result};
 use crate::coin::create_block_reward_id;
+use anyhow::{ensure, Result};
 
 pub const MAX_TRANSACTIONS_PER_BLOCK: usize = 10_000;
 pub const MAX_OUTPUTS_PER_TRANSACTION: usize = 100;
@@ -342,9 +342,13 @@ mod tests {
         let second = Transaction::sign(
             2,
             0,
-            vec![TxOutput { recipient: [9u8; 32], amount: 1 }],
+            vec![TxOutput {
+                recipient: [9u8; 32],
+                amount: 1,
+            }],
             &second_key,
-        ).unwrap();
+        )
+        .unwrap();
         let mut block = candidate_block(&params, vec![first, second]);
         block.transactions.reverse();
         block.transaction_root = block.calculate_transaction_root();
@@ -360,7 +364,10 @@ mod tests {
         let params = ConsensusParams::default();
         let key = SigningKey::from_bytes(&[21u8; 32]);
         let outputs = (0..=MAX_OUTPUTS_PER_TRANSACTION)
-            .map(|index| TxOutput { recipient: [index as u8; 32], amount: 1 })
+            .map(|index| TxOutput {
+                recipient: [index as u8; 32],
+                amount: 1,
+            })
             .collect();
         let tx = Transaction::sign(2, 0, outputs, &key).unwrap();
         let block = candidate_block(&params, vec![tx]);
