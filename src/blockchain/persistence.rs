@@ -298,6 +298,31 @@ mod tests {
         assert!(load_chain(&path, &ConsensusParams::default()).is_err());
     }
 
+
+    #[test]
+    fn failed_save_preserves_existing_valid_chain_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("chain.json");
+        let params = ConsensusParams::default();
+        let valid_chain = valid_one_block_chain(&params);
+
+        save_chain(&path, &valid_chain, &params).unwrap();
+        let original_bytes = fs::read(&path).unwrap();
+
+        let mut corrupted_chain = valid_chain.clone();
+        corrupted_chain.state.balances.insert([99u8; 32], 1);
+
+        assert!(save_chain(&path, &corrupted_chain, &params).is_err());
+        assert_eq!(fs::read(&path).unwrap(), original_bytes);
+        assert!(load_chain(&path, &params).is_ok());
+    }
+
+    #[test]
+    fn rejects_directory_as_chain_file() {
+        let dir = tempdir().unwrap();
+        assert!(load_chain(dir.path(), &ConsensusParams::default()).is_err());
+    }
+
     #[cfg(unix)]
     #[test]
     fn rejects_symlink_chain_file() {
