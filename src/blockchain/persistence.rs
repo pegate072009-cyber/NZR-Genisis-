@@ -245,11 +245,7 @@ mod tests {
     #[test]
     fn rejects_missing_chain_file() {
         let dir = tempdir().unwrap();
-        assert!(load_chain(
-            &dir.path().join("missing.json"),
-            &ConsensusParams::default()
-        )
-        .is_err());
+        assert!(load_chain(&dir.path().join("missing.json"), &ConsensusParams::default()).is_err());
     }
 
     #[test]
@@ -297,7 +293,6 @@ mod tests {
 
         assert!(load_chain(&path, &ConsensusParams::default()).is_err());
     }
-
 
     #[test]
     fn failed_save_preserves_existing_valid_chain_file() {
