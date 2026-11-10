@@ -3,7 +3,9 @@ use std::collections::{BTreeMap, HashSet};
 use anyhow::{ensure, Result};
 
 use super::{
+    block::Block,
     chain::Chain,
+    consensus::ConsensusParams,
     transaction::Transaction,
     validation::{MAX_OUTPUTS_PER_TRANSACTION, MAX_TRANSACTIONS_PER_BLOCK},
 };
@@ -94,6 +96,49 @@ impl Mempool {
         self.transactions.insert(transaction_id, transaction);
 
         Ok(transaction_id)
+    }
+
+    /// Build a candidate block from the currently admitted transactions.
+    ///
+    /// The miner sorts transactions using the same canonical ID ordering as
+    /// block validation. This method does not mutate the pool or chain.
+    pub fn mine_candidate(
+        &self,
+        chain: &Chain,
+        miner_address: [u8; 32],
+        timestamp: u64,
+        current_time: u64,
+        max_nonce_attempts: u64,
+        params: &ConsensusParams,
+    ) -> Result<Block> {
+        super::mining::mine_block(
+            chain,
+            miner_address,
+            self.transactions(),
+            timestamp,
+            current_time,
+            max_nonce_attempts,
+            params,
+        )
+    }
+
+    /// Accept a mined block and synchronize the pool with the new chain state.
+    ///
+    /// The chain is updated first. If block validation fails, neither the
+    /// chain nor the mempool is changed. After successful acceptance, included
+    /// transactions are removed and remaining transactions are revalidated.
+    pub fn accept_mined_block(
+        &mut self,
+        chain: &mut Chain,
+        block: Block,
+        params: &ConsensusParams,
+        current_time: u64,
+    ) -> Result<()> {
+        let included = block.transactions.clone();
+        chain.accept_block(block, params, current_time)?;
+        self.remove_included(&included);
+        self.revalidate(chain, params.protocol_version);
+        Ok(())
     }
 
     /// Remove transactions included in an accepted block.
@@ -292,6 +337,80 @@ mod tests {
 
         assert_eq!(pool.revalidate(&chain, 2), 1);
         assert!(pool.is_empty());
+    }
+
+    #[test]
+    fn mines_and_accepts_pending_transaction_then_clears_pool() {
+        let key = SigningKey::from_bytes(&[12u8; 32]);
+        let mut chain = funded_chain(&key, 5);
+        let params = ConsensusParams {
+            initial_difficulty_bits: 8,
+            max_difficulty_bits: 16,
+            ..ConsensusParams::default()
+        };
+        let transaction = signed_tx(&key, 0, 2);
+        let transaction_id = transaction.id();
+        let mut pool = Mempool::new();
+        pool.admit(transaction, &chain, params.protocol_version)
+            .unwrap();
+
+        let block = pool
+            .mine_candidate(
+                &chain,
+                [0xD1; 32],
+                1_000_000,
+                1_000_000,
+                100_000,
+                &params,
+            )
+            .unwrap();
+
+        assert_eq!(block.transactions.len(), 1);
+        assert_eq!(block.transactions[0].id(), transaction_id);
+
+        pool.accept_mined_block(&mut chain, block, &params, 1_000_000)
+            .unwrap();
+
+        assert!(pool.is_empty());
+        assert_eq!(chain.state.balances.get(&[0xB2; 32]), Some(&2));
+        assert_eq!(
+            chain.state.next_nonce.get(&key.verifying_key().to_bytes()),
+            Some(&1)
+        );
+    }
+
+    #[test]
+    fn failed_block_acceptance_does_not_change_pool_or_chain() {
+        let key = SigningKey::from_bytes(&[13u8; 32]);
+        let mut chain = funded_chain(&key, 5);
+        let params = ConsensusParams {
+            initial_difficulty_bits: 8,
+            max_difficulty_bits: 16,
+            ..ConsensusParams::default()
+        };
+        let mut pool = Mempool::new();
+        pool.admit(signed_tx(&key, 0, 1), &chain, params.protocol_version)
+            .unwrap();
+
+        let before_chain = chain.clone();
+        let mut block = pool
+            .mine_candidate(
+                &chain,
+                [0xD2; 32],
+                1_000_000,
+                1_000_000,
+                100_000,
+                &params,
+            )
+            .unwrap();
+        block.reward_coin_id[0] ^= 1;
+
+        assert!(pool
+            .accept_mined_block(&mut chain, block, &params, 1_000_000)
+            .is_err());
+        assert_eq!(chain.blocks, before_chain.blocks);
+        assert_eq!(chain.state.balances, before_chain.state.balances);
+        assert_eq!(pool.len(), 1);
     }
 
     #[test]
