@@ -291,13 +291,22 @@ mod tests {
     fn rejects_too_many_outputs() {
         let key = SigningKey::from_bytes(&[7u8; 32]);
         let chain = funded_chain(&key, 5);
-        let outputs = (0..=MAX_OUTPUTS_PER_TRANSACTION)
+        let mut transaction = Transaction::sign(
+            2,
+            0,
+            vec![TxOutput {
+                recipient: [1u8; 32],
+                amount: 1,
+            }],
+            &key,
+        )
+        .unwrap();
+        transaction.outputs = (0..=MAX_OUTPUTS_PER_TRANSACTION)
             .map(|index| TxOutput {
                 recipient: [index as u8; 32],
                 amount: 1,
             })
             .collect();
-        let transaction = Transaction::sign(2, 0, outputs, &key).unwrap();
         let mut pool = Mempool::new();
 
         assert!(pool.admit(transaction, &chain, 2).is_err());
