@@ -253,12 +253,10 @@ mod tests {
 
     #[test]
     fn rejects_invalid_slot_ranges_and_record_counts() {
-        let bad_count =
-            valid_manifest_json().replace(r#""coin_records": 2"#, r#""coin_records": 1"#);
+        let bad_count = valid_manifest_json().replace(r#""coin_records": 2"#, r#""coin_records": 1"#);
         assert!(serde_json::from_str::<Manifest>(&bad_count).is_err());
 
-        let out_of_domain = valid_manifest_json()
-            .replace(r#""last_slot": 1"#, r#""last_slot": 2"#);
+        let out_of_domain = valid_manifest_json().replace(r#""last_slot": 1"#, r#""last_slot": 2"#);
         assert!(serde_json::from_str::<Manifest>(&out_of_domain).is_err());
     }
 
