@@ -38,12 +38,6 @@ fn make_fixture() -> Fixture {
     write_key(&signing_key_path, &signing_bytes);
     write_key(&public_key, &signing_key.verifying_key().to_bytes());
 
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&public_key, fs::Permissions::from_mode(0o644)).unwrap();
-    }
-
     generate_supply_for_network(&output, 1, 16, "test", &encryption_key, &signing_key_path)
         .unwrap();
 
@@ -56,7 +50,7 @@ fn make_fixture() -> Fixture {
 }
 
 #[test]
-fn valid_test_inventory_passes_full_verification_with_world_readable_public_key() {
+fn valid_test_inventory_passes_full_verification() {
     let fixture = make_fixture();
 
     verify_supply(
