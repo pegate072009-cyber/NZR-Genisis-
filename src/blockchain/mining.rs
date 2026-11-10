@@ -22,7 +22,10 @@ pub fn mine_block(
     params: &ConsensusParams,
 ) -> Result<Block> {
     params.validate()?;
-    ensure!(max_nonce_attempts > 0, "nonce attempt limit must be positive");
+    ensure!(
+        max_nonce_attempts > 0,
+        "nonce attempt limit must be positive"
+    );
 
     let height = chain
         .height()
