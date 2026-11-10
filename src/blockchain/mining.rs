@@ -29,13 +29,7 @@ pub fn mine_block(
     max_nonce_attempts: u64,
     params: &ConsensusParams,
 ) -> Result<Block> {
-    let mut block = create_candidate(
-        chain,
-        miner_address,
-        &mut transactions,
-        timestamp,
-        params,
-    )?;
+    let mut block = create_candidate(chain, miner_address, &mut transactions, timestamp, params)?;
 
     ensure!(
         max_nonce_attempts > 0,
@@ -70,18 +64,17 @@ pub fn mine_block_parallel(
     params: &ConsensusParams,
 ) -> Result<Block> {
     ensure!(worker_count > 0, "worker count must be positive");
+    ensure!(worker_count <= 256, "worker count exceeds the safety limit");
+    ensure!(
+        worker_count as u64 <= max_nonce_attempts,
+        "worker count cannot exceed the nonce attempt limit"
+    );
     ensure!(
         max_nonce_attempts > 0,
         "nonce attempt limit must be positive"
     );
 
-    let template = create_candidate(
-        chain,
-        miner_address,
-        &mut transactions,
-        timestamp,
-        params,
-    )?;
+    let template = create_candidate(chain, miner_address, &mut transactions, timestamp, params)?;
     let found = Mutex::new(None);
     let cancelled = AtomicBool::new(false);
 
@@ -92,9 +85,12 @@ pub fn mine_block_parallel(
             let mut block = template.clone();
             let found_ref = &found;
             let cancelled_ref = &cancelled;
-            let attempts_for_worker =
-                max_nonce_attempts / worker_count as u64
-                    + u64::from((worker_id as u64) < max_nonce_attempts % worker_count as u64);
+            let attempts_for_worker = max_nonce_attempts / worker_count as u64
+                + if (worker_id as u64) < max_nonce_attempts % worker_count as u64 {
+                    1
+                } else {
+                    0
+                };
 
             handles.push(scope.spawn(move || {
                 for attempt in 0..attempts_for_worker {
