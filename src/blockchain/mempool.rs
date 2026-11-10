@@ -396,7 +396,10 @@ mod tests {
         assert_eq!(chain.state.balances, before_state.balances);
         assert_eq!(chain.state.next_nonce, before_state.next_nonce);
         assert_eq!(chain.state.issued_coin_ids, before_state.issued_coin_ids);
-        assert_eq!(chain.state.issued_coin_count, before_state.issued_coin_count);
+        assert_eq!(
+            chain.state.issued_coin_count,
+            before_state.issued_coin_count
+        );
         assert!(pool.contains(&transaction_id));
         assert_eq!(pool.len(), 1);
     }
