@@ -16,6 +16,36 @@ pub struct LedgerState {
 }
 
 impl LedgerState {
+    /// Check ledger-wide accounting invariants without changing state.
+    /// Transfers conserve the total balance; each issued NZR contributes
+    /// exactly one unit to the sum of all account balances.
+    pub fn verify_invariants(&self) -> Result<()> {
+        let issued_id_count = u64::try_from(self.issued_coin_ids.len())
+            .map_err(|_| anyhow::anyhow!("issued coin ID count overflow"))?;
+        ensure!(
+            issued_id_count == self.issued_coin_count,
+            "issued coin ID set does not match issued coin count"
+        );
+
+        let total_balances = self
+            .balances
+            .values()
+            .try_fold(0u128, |sum, balance| {
+                sum.checked_add(u128::from(*balance))
+                    .ok_or_else(|| anyhow::anyhow!("ledger balance total overflow"))
+            })?;
+        ensure!(
+            total_balances == u128::from(self.issued_coin_count),
+            "total account balances do not match issued supply"
+        );
+        ensure!(
+            self.next_nonce.values().all(|nonce| *nonce > 0),
+            "ledger contains an invalid zero transaction nonce"
+        );
+
+        Ok(())
+    }
+
     pub fn apply_transaction(&mut self, tx: &Transaction) -> Result<()> {
         tx.verify_signature()?;
         ensure!(!tx.outputs.is_empty(), "transaction has no outputs");
@@ -218,6 +248,31 @@ mod tests {
         assert!(state.issue_sequential_coin(2, [42u8; 32], miner).is_err());
         assert_eq!(state.issued_coin_count, 0);
         assert!(!state.balances.contains_key(&miner));
+    }
+
+    #[test]
+    fn verifies_consistent_ledger_accounting() {
+        let mut state = LedgerState::default();
+        state.issue_sequential_coin(1, [51u8; 32], [52u8; 32]).unwrap();
+
+        assert!(state.verify_invariants().is_ok());
+    }
+
+    #[test]
+    fn rejects_balance_total_that_differs_from_issued_supply() {
+        let mut state = LedgerState::default();
+        state.issue_sequential_coin(1, [53u8; 32], [54u8; 32]).unwrap();
+        state.balances.insert([55u8; 32], 1);
+
+        assert!(state.verify_invariants().is_err());
+    }
+
+    #[test]
+    fn rejects_issued_id_count_mismatch() {
+        let mut state = LedgerState::default();
+        state.issued_coin_count = 1;
+
+        assert!(state.verify_invariants().is_err());
     }
 
     #[test]

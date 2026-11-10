@@ -43,6 +43,7 @@ impl Chain {
             candidate_state.issued_coin_count == block.reward_coin_number,
             "ledger reward count mismatch"
         );
+        candidate_state.verify_invariants()?;
 
         self.blocks.push(block);
         self.state = candidate_state;
@@ -57,6 +58,7 @@ impl Chain {
     /// reward number during replay; stored IDs are never trusted as inputs.
     pub fn verify_integrity(&self, params: &ConsensusParams) -> Result<()> {
         params.validate()?;
+        self.state.verify_invariants()?;
 
         let mut replayed = Chain::default();
 
@@ -175,6 +177,28 @@ mod tests {
         chain.accept_block(block, &params, 1_000_000).unwrap();
 
         chain.state.balances.insert([7u8; 32], 999);
+
+        assert!(chain.verify_integrity(&params).is_err());
+    }
+
+    #[test]
+    fn detects_corrupted_total_balance_during_integrity_check() {
+        let params = ConsensusParams::default();
+        let block = mined_first_block(&params);
+        let mut chain = Chain::default();
+        chain.accept_block(block, &params, 1_000_000).unwrap();
+        chain.state.balances.insert([99u8; 32], 1);
+
+        assert!(chain.verify_integrity(&params).is_err());
+    }
+
+    #[test]
+    fn detects_corrupted_issued_coin_count_during_integrity_check() {
+        let params = ConsensusParams::default();
+        let block = mined_first_block(&params);
+        let mut chain = Chain::default();
+        chain.accept_block(block, &params, 1_000_000).unwrap();
+        chain.state.issued_coin_count = 0;
 
         assert!(chain.verify_integrity(&params).is_err());
     }
