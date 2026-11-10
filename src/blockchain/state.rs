@@ -2,7 +2,10 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::{ensure, Result};
 
-use super::transaction::{Transaction, TxOutput};
+use super::{
+    consensus::NEZORA_MAX_SUPPLY,
+    transaction::{Transaction, TxOutput},
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct LedgerState {
@@ -55,8 +58,6 @@ impl LedgerState {
         coin_id: [u8; 32],
         miner: [u8; 32],
     ) -> Result<()> {
-        const MAX_SUPPLY: u64 = 30_000_000;
-
         let expected_number = self
             .issued_coin_count
             .checked_add(1)
@@ -66,7 +67,10 @@ impl LedgerState {
             coin_number == expected_number,
             "reward coin must be the next sequential number"
         );
-        ensure!(coin_number <= MAX_SUPPLY, "maximum supply exceeded");
+        ensure!(
+            coin_number <= NEZORA_MAX_SUPPLY,
+            "maximum supply exceeded"
+        );
         ensure!(
             !self.issued_coin_ids.contains(&coin_id),
             "coin already issued"

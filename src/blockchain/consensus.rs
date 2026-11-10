@@ -2,6 +2,11 @@ use anyhow::{ensure, Result};
 
 use super::chain::Chain;
 
+/// Consensus-fixed Nezora monetary limits. These values are protocol rules,
+/// not operator-configurable settings.
+pub const NEZORA_MAX_SUPPLY: u64 = 30_000_000;
+pub const NEZORA_BLOCK_REWARD: u64 = 1;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConsensusParams {
     pub protocol_version: u32,
@@ -17,10 +22,9 @@ pub struct ConsensusParams {
 impl Default for ConsensusParams {
     fn default() -> Self {
         Self {
-            // V2 activates the unambiguous Merkle commitment.
             protocol_version: 2,
-            max_supply: 30_000_000,
-            block_reward: 1,
+            max_supply: NEZORA_MAX_SUPPLY,
+            block_reward: NEZORA_BLOCK_REWARD,
             target_block_time_secs: 600,
             retarget_interval: 2_016,
             initial_difficulty_bits: 12,
@@ -36,8 +40,14 @@ impl ConsensusParams {
             self.protocol_version > 0,
             "protocol version must be positive"
         );
-        ensure!(self.max_supply > 0, "maximum supply must be positive");
-        ensure!(self.block_reward == 1, "Nezora block reward must be 1 NZR");
+        ensure!(
+            self.max_supply == NEZORA_MAX_SUPPLY,
+            "Nezora maximum supply is fixed at 30,000,000 NZR"
+        );
+        ensure!(
+            self.block_reward == NEZORA_BLOCK_REWARD,
+            "Nezora block reward is fixed at 1 NZR"
+        );
         ensure!(
             self.target_block_time_secs > 0,
             "target block time must be positive"
@@ -91,7 +101,6 @@ pub fn expected_difficulty_bits(
         return Ok(previous_bits);
     }
 
-    // A retarget window of N blocks contains N-1 timestamp intervals.
     let period_len = params.retarget_interval - 1;
     let target_span = period_len
         .checked_mul(params.target_block_time_secs)
@@ -121,7 +130,6 @@ pub fn expected_difficulty_bits(
         previous_bits
     };
 
-    // Never allow retargeting to reduce work below the configured baseline.
     Ok(adjusted
         .max(params.initial_difficulty_bits)
         .min(params.max_difficulty_bits))
@@ -153,6 +161,28 @@ mod tests {
         let mut params = ConsensusParams::default();
         params.initial_difficulty_bits = 0;
         assert!(params.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_modified_maximum_supply() {
+        let mut params = ConsensusParams::default();
+        params.max_supply += 1;
+        assert!(params.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_modified_block_reward() {
+        let mut params = ConsensusParams::default();
+        params.block_reward = 2;
+        assert!(params.validate().is_err());
+    }
+
+    #[test]
+    fn accepts_protocol_monetary_constants() {
+        let params = ConsensusParams::default();
+        assert_eq!(params.max_supply, NEZORA_MAX_SUPPLY);
+        assert_eq!(params.block_reward, NEZORA_BLOCK_REWARD);
+        assert!(params.validate().is_ok());
     }
 
     #[test]
