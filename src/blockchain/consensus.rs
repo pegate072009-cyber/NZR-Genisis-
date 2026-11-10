@@ -102,9 +102,7 @@ pub fn expected_difficulty_bits(
     let retarget_interval = usize::try_from(params.retarget_interval)
         .map_err(|_| anyhow::anyhow!("retarget interval does not fit this platform"))?;
 
-    if (next_height - 1) % params.retarget_interval != 0
-        || chain.blocks.len() < retarget_interval
-    {
+    if (next_height - 1) % params.retarget_interval != 0 || chain.blocks.len() < retarget_interval {
         return Ok(previous_bits);
     }
 
