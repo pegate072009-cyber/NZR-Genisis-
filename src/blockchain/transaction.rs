@@ -202,4 +202,39 @@ mod tests {
         )
         .is_err());
     }
+
+    #[test]
+    fn rejects_modified_nonce() {
+        let (_, mut tx) = sample_transaction();
+        tx.nonce = tx.nonce.checked_add(1).unwrap();
+        assert!(tx.verify_signature().is_err());
+    }
+
+    #[test]
+    fn rejects_sender_that_does_not_match_public_key() {
+        let (_, mut tx) = sample_transaction();
+        tx.sender[0] ^= 0x01;
+        assert!(tx.verify_signature().is_err());
+    }
+
+    #[test]
+    fn rejects_malformed_signature_length() {
+        let (_, mut tx) = sample_transaction();
+        tx.signature.pop();
+        assert!(tx.verify_signature().is_err());
+    }
+
+    #[test]
+    fn rejects_empty_outputs_after_deserialization() {
+        let (_, mut tx) = sample_transaction();
+        tx.outputs.clear();
+        assert!(tx.verify_signature().is_err());
+    }
+
+    #[test]
+    fn rejects_zero_amount_after_deserialization() {
+        let (_, mut tx) = sample_transaction();
+        tx.outputs[0].amount = 0;
+        assert!(tx.verify_signature().is_err());
+    }
 }
