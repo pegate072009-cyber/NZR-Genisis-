@@ -3,10 +3,7 @@ use serde::Serialize;
 use std::path::PathBuf;
 
 use crate::{
-    ledger::Ledger,
-    persistence::LedgerStore,
-    state::LedgerStateFile,
-    transaction::Transaction,
+    ledger::Ledger, persistence::LedgerStore, state::LedgerStateFile, transaction::Transaction,
 };
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -152,7 +149,9 @@ mod tests {
         let bob_address = hex::encode(bob.verifying_key().to_bytes());
         let mut state = LedgerStateFile::new(vec![allocation(&alice, 100)]);
         let transaction = Transaction::sign(&alice, &bob_address, 0, 30).unwrap();
-        store.apply_and_save(&mut state, transaction.clone()).unwrap();
+        store
+            .apply_and_save(&mut state, transaction.clone())
+            .unwrap();
 
         let queries = LedgerQueries::new(path);
         let account = queries.account(&bob_address).unwrap();
@@ -184,8 +183,7 @@ mod tests {
         let bob_address = hex::encode(bob.verifying_key().to_bytes());
         let mut state = LedgerStateFile::new(vec![allocation(&alice, 100)]);
         for nonce in 0..3 {
-            let transaction =
-                Transaction::sign(&alice, &bob_address, nonce, 1).unwrap();
+            let transaction = Transaction::sign(&alice, &bob_address, nonce, 1).unwrap();
             state.append(transaction).unwrap();
         }
         store.save(&state).unwrap();

@@ -17,7 +17,11 @@ use nezora_supply::{
 const MAX_PINNED_MANIFEST_BYTES: u64 = 1_048_576;
 
 #[derive(Parser)]
-#[command(name = "nezora", version, about = "Nezora (NZR) Genesis and Ledger Tool")]
+#[command(
+    name = "nezora",
+    version,
+    about = "Nezora (NZR) Genesis and Ledger Tool"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -323,12 +327,10 @@ fn main() -> Result<()> {
         Command::History { limit, db } => {
             print_json(&LedgerQueries::new(db).history(limit)?)?;
         }
-        Command::Transaction { id, db } => {
-            match LedgerQueries::new(db).transaction(&id)? {
-                Some(entry) => print_json(&entry)?,
-                None => anyhow::bail!("transaction not found"),
-            }
-        }
+        Command::Transaction { id, db } => match LedgerQueries::new(db).transaction(&id)? {
+            Some(entry) => print_json(&entry)?,
+            None => anyhow::bail!("transaction not found"),
+        },
     }
     Ok(())
 }
