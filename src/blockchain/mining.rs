@@ -1540,12 +1540,7 @@ mod tests {
         let signature = signing_key.sign(&challenge.signing_bytes());
 
         assert!(pool
-            .complete_authentication(
-                challenge.challenge_id,
-                &signature.to_bytes(),
-                111,
-                5
-            )
+            .complete_authentication(challenge.challenge_id, &signature.to_bytes(), 111, 5)
             .is_err());
 
         let challenge = pool.issue_auth_challenge(worker_id, 200, 10).unwrap();
