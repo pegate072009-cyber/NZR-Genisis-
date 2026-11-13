@@ -571,7 +571,7 @@ mod tests {
         assert_eq!(pool.accepted_share_count(), 1);
         assert!(pool.submit_share([1u8; 32], job_id, 1, 150).is_err());
     }
-}
+
     #[test]
     fn tracks_accepted_shares_per_worker() {
         let mut pool = MiningPoolCoordinator::new(3, 10).unwrap();
@@ -634,4 +634,4 @@ mod tests {
 
         assert_eq!(pool.worker_accepted_share_count(&worker_id), None);
     }
-
+}
