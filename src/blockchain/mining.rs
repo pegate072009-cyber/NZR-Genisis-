@@ -770,8 +770,7 @@ impl MiningPoolCoordinator {
         challenge_ttl_seconds: u64,
     ) -> Result<PoolAuthChallenge> {
         ensure!(
-            challenge_ttl_seconds > 0
-                && challenge_ttl_seconds <= MAX_AUTH_CHALLENGE_TTL_SECONDS,
+            challenge_ttl_seconds > 0 && challenge_ttl_seconds <= MAX_AUTH_CHALLENGE_TTL_SECONDS,
             "authentication challenge lifetime is invalid"
         );
         let expires_at = now
@@ -882,11 +881,7 @@ impl MiningPoolCoordinator {
     }
 
     /// Checks a bearer token and returns its worker identity if still valid.
-    pub fn authenticated_worker(
-        &mut self,
-        token: &[u8; 32],
-        now: u64,
-    ) -> Result<[u8; 32]> {
+    pub fn authenticated_worker(&mut self, token: &[u8; 32], now: u64) -> Result<[u8; 32]> {
         let token_hash: [u8; 32] = Sha256::digest(token).into();
         let session = self
             .active_worker_sessions
@@ -1493,14 +1488,12 @@ mod tests {
             .unwrap();
 
         assert_eq!(session.worker_id, worker_id);
-        assert_eq!(pool.authenticated_worker(&session.token, 111).unwrap(), worker_id);
+        assert_eq!(
+            pool.authenticated_worker(&session.token, 111).unwrap(),
+            worker_id
+        );
         assert!(pool
-            .complete_authentication(
-                challenge.challenge_id,
-                &signature.to_bytes(),
-                112,
-                300
-            )
+            .complete_authentication(challenge.challenge_id, &signature.to_bytes(), 112, 300)
             .is_err());
     }
 
