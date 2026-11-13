@@ -1,4 +1,6 @@
 use anyhow::{ensure, Context, Result};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -250,6 +252,51 @@ pub const DEFAULT_PPLNS_WINDOW_SIZE: usize = 1_000;
 const BASIS_POINTS_DENOMINATOR: u128 = 10_000;
 
 const POOL_STATE_FORMAT_VERSION: u32 = 1;
+const MAX_AUTH_CHALLENGE_TTL_SECONDS: u64 = 300;
+const MAX_AUTH_SESSION_TTL_SECONDS: u64 = 86_400;
+const AUTH_CHALLENGE_DOMAIN: &[u8] = b"NEZORA-POOL-AUTH-CHALLENGE-V1";
+
+/// A one-time challenge that a worker must sign with its Ed25519 private key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PoolAuthChallenge {
+    pub challenge_id: [u8; 32],
+    pub worker_id: [u8; 32],
+    pub nonce: [u8; 32],
+    pub expires_at: u64,
+}
+
+impl PoolAuthChallenge {
+    /// Bytes the worker signs to prove possession of its private key.
+    pub fn signing_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(32 * 3 + 8 + AUTH_CHALLENGE_DOMAIN.len());
+        bytes.extend_from_slice(AUTH_CHALLENGE_DOMAIN);
+        bytes.extend_from_slice(&self.challenge_id);
+        bytes.extend_from_slice(&self.worker_id);
+        bytes.extend_from_slice(&self.nonce);
+        bytes.extend_from_slice(&self.expires_at.to_be_bytes());
+        bytes
+    }
+}
+
+/// Opaque bearer session token. Keep it secret and do not log it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PoolWorkerSession {
+    pub worker_id: [u8; 32],
+    pub token: [u8; 32],
+    pub expires_at: u64,
+}
+
+#[derive(Debug, Clone)]
+struct PendingPoolAuthChallenge {
+    challenge: PoolAuthChallenge,
+}
+
+#[derive(Debug, Clone)]
+struct ActivePoolWorkerSession {
+    worker_id: [u8; 32],
+    expires_at: u64,
+}
+
 const MAX_POOL_STATE_FILE_BYTES: u64 = 64 * 1024 * 1024;
 static POOL_STATE_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -314,6 +361,8 @@ pub struct MiningPoolCoordinator {
     pool_fee_basis_points: u16,
     pplns_share_window: VecDeque<[u8; 32]>,
     pplns_share_difficulty_bits: Option<u16>,
+    pending_auth_challenges: HashMap<[u8; 32], PendingPoolAuthChallenge>,
+    active_worker_sessions: HashMap<[u8; 32], ActivePoolWorkerSession>,
 }
 
 impl MiningPoolCoordinator {
@@ -593,6 +642,9 @@ impl MiningPoolCoordinator {
             pool_fee_basis_points: payload.pool_fee_basis_points,
             pplns_share_window: payload.pplns_share_window.into(),
             pplns_share_difficulty_bits: payload.pplns_share_difficulty_bits,
+            // Sessions and pending challenges are intentionally not restored.
+            pending_auth_challenges: HashMap::new(),
+            active_worker_sessions: HashMap::new(),
         })
     }
 
@@ -653,6 +705,8 @@ impl MiningPoolCoordinator {
             pool_fee_basis_points,
             pplns_share_window: VecDeque::with_capacity(pplns_window_size.min(4_096)),
             pplns_share_difficulty_bits: None,
+            pending_auth_challenges: HashMap::new(),
+            active_worker_sessions: HashMap::new(),
         })
     }
 
@@ -705,6 +759,159 @@ impl MiningPoolCoordinator {
         self.worker_share_counts.clear();
 
         Ok(job_id)
+    }
+
+    /// Issues a short-lived, one-time challenge for an Ed25519 worker key.
+    /// `worker_id` is the worker's 32-byte Ed25519 public key.
+    pub fn issue_auth_challenge(
+        &mut self,
+        worker_id: [u8; 32],
+        now: u64,
+        challenge_ttl_seconds: u64,
+    ) -> Result<PoolAuthChallenge> {
+        ensure!(
+            challenge_ttl_seconds > 0
+                && challenge_ttl_seconds <= MAX_AUTH_CHALLENGE_TTL_SECONDS,
+            "authentication challenge lifetime is invalid"
+        );
+        let expires_at = now
+            .checked_add(challenge_ttl_seconds)
+            .ok_or_else(|| anyhow::anyhow!("authentication challenge expiry overflow"))?;
+
+        self.pending_auth_challenges
+            .retain(|_, entry| now <= entry.challenge.expires_at);
+        self.active_worker_sessions
+            .retain(|_, session| now <= session.expires_at);
+        ensure!(
+            self.pending_auth_challenges.len() < self.max_workers,
+            "pending authentication challenge limit reached"
+        );
+
+        let mut nonce = [0u8; 32];
+        OsRng.fill_bytes(&mut nonce);
+
+        let mut challenge_hasher = Sha256::new();
+        challenge_hasher.update(AUTH_CHALLENGE_DOMAIN);
+        challenge_hasher.update(worker_id);
+        challenge_hasher.update(nonce);
+        challenge_hasher.update(expires_at.to_be_bytes());
+        let challenge_id: [u8; 32] = challenge_hasher.finalize().into();
+
+        ensure!(
+            !self.pending_auth_challenges.contains_key(&challenge_id),
+            "authentication challenge collision"
+        );
+
+        let challenge = PoolAuthChallenge {
+            challenge_id,
+            worker_id,
+            nonce,
+            expires_at,
+        };
+        self.pending_auth_challenges.insert(
+            challenge_id,
+            PendingPoolAuthChallenge {
+                challenge: challenge.clone(),
+            },
+        );
+        Ok(challenge)
+    }
+
+    /// Verifies a one-time Ed25519 response and creates a short-lived session.
+    /// A challenge is consumed before signature verification to prevent replay.
+    pub fn complete_authentication(
+        &mut self,
+        challenge_id: [u8; 32],
+        signature_bytes: &[u8],
+        now: u64,
+        session_ttl_seconds: u64,
+    ) -> Result<PoolWorkerSession> {
+        ensure!(
+            session_ttl_seconds > 0 && session_ttl_seconds <= MAX_AUTH_SESSION_TTL_SECONDS,
+            "worker session lifetime is invalid"
+        );
+        let expires_at = now
+            .checked_add(session_ttl_seconds)
+            .ok_or_else(|| anyhow::anyhow!("worker session expiry overflow"))?;
+
+        let pending = self
+            .pending_auth_challenges
+            .remove(&challenge_id)
+            .ok_or_else(|| anyhow::anyhow!("unknown or already used authentication challenge"))?;
+        ensure!(
+            now <= pending.challenge.expires_at,
+            "authentication challenge has expired"
+        );
+
+        let verifying_key = VerifyingKey::from_bytes(&pending.challenge.worker_id)
+            .map_err(|_| anyhow::anyhow!("invalid worker public key"))?;
+        let signature = Signature::from_slice(signature_bytes)
+            .map_err(|_| anyhow::anyhow!("invalid authentication signature encoding"))?;
+        verifying_key
+            .verify(&pending.challenge.signing_bytes(), &signature)
+            .map_err(|_| anyhow::anyhow!("worker authentication failed"))?;
+
+        self.active_worker_sessions
+            .retain(|_, session| now <= session.expires_at);
+        ensure!(
+            self.active_worker_sessions.len() < self.max_workers,
+            "active worker session limit reached"
+        );
+
+        let mut token = [0u8; 32];
+        OsRng.fill_bytes(&mut token);
+        let token_hash: [u8; 32] = Sha256::digest(token).into();
+        ensure!(
+            !self.active_worker_sessions.contains_key(&token_hash),
+            "worker session token collision"
+        );
+
+        self.active_worker_sessions.insert(
+            token_hash,
+            ActivePoolWorkerSession {
+                worker_id: pending.challenge.worker_id,
+                expires_at,
+            },
+        );
+
+        Ok(PoolWorkerSession {
+            worker_id: pending.challenge.worker_id,
+            token,
+            expires_at,
+        })
+    }
+
+    /// Checks a bearer token and returns its worker identity if still valid.
+    pub fn authenticated_worker(
+        &mut self,
+        token: &[u8; 32],
+        now: u64,
+    ) -> Result<[u8; 32]> {
+        let token_hash: [u8; 32] = Sha256::digest(token).into();
+        let session = self
+            .active_worker_sessions
+            .get(&token_hash)
+            .ok_or_else(|| anyhow::anyhow!("unknown or revoked worker session"))?;
+        ensure!(now <= session.expires_at, "worker session has expired");
+        Ok(session.worker_id)
+    }
+
+    /// Revokes a session immediately. Returns false for an unknown token.
+    pub fn revoke_worker_session(&mut self, token: &[u8; 32]) -> bool {
+        let token_hash: [u8; 32] = Sha256::digest(token).into();
+        self.active_worker_sessions.remove(&token_hash).is_some()
+    }
+
+    /// Registers a worker only when the supplied session belongs to that key.
+    pub fn register_authenticated_worker(
+        &mut self,
+        token: &[u8; 32],
+        now: u64,
+        nonce_start: u64,
+        nonce_stride: u64,
+    ) -> Result<PoolWorkerAssignment> {
+        let worker_id = self.authenticated_worker(token, now)?;
+        self.register_worker(worker_id, nonce_start, nonce_stride)
     }
 
     pub fn register_worker(
@@ -1268,5 +1475,122 @@ mod tests {
         fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
 
         assert!(MiningPoolCoordinator::load_from_file(&path).is_err());
+    }
+
+    #[test]
+    fn authenticates_worker_with_one_time_ed25519_challenge() {
+        use ed25519_dalek::{Signer, SigningKey};
+
+        let mut pool = MiningPoolCoordinator::new(2, 10).unwrap();
+        let signing_key = SigningKey::from_bytes(&[41u8; 32]);
+        let worker_id = signing_key.verifying_key().to_bytes();
+        let challenge = pool.issue_auth_challenge(worker_id, 100, 60).unwrap();
+        let signature = signing_key.sign(&challenge.signing_bytes());
+
+        let session = pool
+            .complete_authentication(challenge.challenge_id, &signature.to_bytes(), 110, 300)
+            .unwrap();
+
+        assert_eq!(session.worker_id, worker_id);
+        assert_eq!(pool.authenticated_worker(&session.token, 111).unwrap(), worker_id);
+        assert!(pool
+            .complete_authentication(
+                challenge.challenge_id,
+                &signature.to_bytes(),
+                112,
+                300
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_signature_and_consumes_challenge() {
+        let mut pool = MiningPoolCoordinator::new(2, 10).unwrap();
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&[42u8; 32]);
+        let worker_id = signing_key.verifying_key().to_bytes();
+        let challenge = pool.issue_auth_challenge(worker_id, 100, 60).unwrap();
+        let wrong_key = ed25519_dalek::SigningKey::from_bytes(&[43u8; 32]);
+        let wrong_signature = wrong_key.sign(&challenge.signing_bytes());
+
+        assert!(pool
+            .complete_authentication(
+                challenge.challenge_id,
+                &wrong_signature.to_bytes(),
+                110,
+                300
+            )
+            .is_err());
+        assert!(pool
+            .complete_authentication(
+                challenge.challenge_id,
+                &signing_key.sign(&challenge.signing_bytes()).to_bytes(),
+                111,
+                300
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn rejects_expired_authentication_challenge_and_session() {
+        let mut pool = MiningPoolCoordinator::new(2, 10).unwrap();
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&[44u8; 32]);
+        let worker_id = signing_key.verifying_key().to_bytes();
+        let challenge = pool.issue_auth_challenge(worker_id, 100, 10).unwrap();
+        let signature = signing_key.sign(&challenge.signing_bytes());
+
+        assert!(pool
+            .complete_authentication(
+                challenge.challenge_id,
+                &signature.to_bytes(),
+                111,
+                5
+            )
+            .is_err());
+
+        let challenge = pool.issue_auth_challenge(worker_id, 200, 10).unwrap();
+        let signature = signing_key.sign(&challenge.signing_bytes());
+        let session = pool
+            .complete_authentication(challenge.challenge_id, &signature.to_bytes(), 201, 5)
+            .unwrap();
+        assert!(pool.authenticated_worker(&session.token, 207).is_err());
+    }
+
+    #[test]
+    fn revokes_sessions_and_requires_auth_for_authenticated_registration() {
+        let mut pool = MiningPoolCoordinator::new(2, 10).unwrap();
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&[45u8; 32]);
+        let worker_id = signing_key.verifying_key().to_bytes();
+        let challenge = pool.issue_auth_challenge(worker_id, 100, 60).unwrap();
+        let signature = signing_key.sign(&challenge.signing_bytes());
+        let session = pool
+            .complete_authentication(challenge.challenge_id, &signature.to_bytes(), 101, 300)
+            .unwrap();
+
+        pool.register_authenticated_worker(&session.token, 102, 0, 1)
+            .unwrap();
+        assert_eq!(pool.worker_count(), 1);
+        assert!(pool.revoke_worker_session(&session.token));
+        assert!(pool.authenticated_worker(&session.token, 103).is_err());
+        assert!(pool
+            .register_authenticated_worker(&session.token, 104, 1, 1)
+            .is_err());
+    }
+
+    #[test]
+    fn authentication_sessions_are_not_restored_from_disk() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("pool-state.json");
+        let mut pool = MiningPoolCoordinator::new(2, 10).unwrap();
+        let signing_key = ed25519_dalek::SigningKey::from_bytes(&[46u8; 32]);
+        let worker_id = signing_key.verifying_key().to_bytes();
+        let challenge = pool.issue_auth_challenge(worker_id, 100, 60).unwrap();
+        let signature = signing_key.sign(&challenge.signing_bytes());
+        let session = pool
+            .complete_authentication(challenge.challenge_id, &signature.to_bytes(), 101, 300)
+            .unwrap();
+        pool.save_to_file(&path).unwrap();
+
+        let mut restored = MiningPoolCoordinator::load_from_file(&path).unwrap();
+        assert!(restored.authenticated_worker(&session.token, 102).is_err());
     }
 }
