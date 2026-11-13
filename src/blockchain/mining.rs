@@ -1189,6 +1189,7 @@ impl MiningPoolCoordinator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ed25519_dalek::Signer;
 
     fn sample_template(difficulty_bits: u16) -> Block {
         Block {
@@ -1479,7 +1480,7 @@ mod tests {
 
     #[test]
     fn authenticates_worker_with_one_time_ed25519_challenge() {
-        use ed25519_dalek::{Signer, SigningKey};
+        use ed25519_dalek::SigningKey;
 
         let mut pool = MiningPoolCoordinator::new(2, 10).unwrap();
         let signing_key = SigningKey::from_bytes(&[41u8; 32]);
