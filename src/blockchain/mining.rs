@@ -838,7 +838,11 @@ mod tests {
                 .accepted_shares,
             2
         );
-        let allocated: u64 = reward.allocations.iter().map(|item| item.reward_units).sum();
+        let allocated: u64 = reward
+            .allocations
+            .iter()
+            .map(|item| item.reward_units)
+            .sum();
         assert_eq!(allocated + reward.pool_fee_units, reward.gross_reward_units);
     }
 
