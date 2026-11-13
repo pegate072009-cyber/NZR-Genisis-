@@ -428,7 +428,10 @@ impl MiningPoolCoordinator {
             .values()
             .map(|count| u128::from(*count))
             .sum();
-        ensure!(total_shares > 0, "cannot allocate reward without accepted shares");
+        ensure!(
+            total_shares > 0,
+            "cannot allocate reward without accepted shares"
+        );
 
         let mut allocations = Vec::with_capacity(self.worker_share_counts.len());
         let mut remainders = Vec::with_capacity(self.worker_share_counts.len());
@@ -454,9 +457,7 @@ impl MiningPoolCoordinator {
             remainders.push((*worker_id, remainder));
         }
 
-        remainders.sort_by(|left, right| {
-            right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0))
-        });
+        remainders.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
 
         let leftover_units = reward_units
             .checked_sub(allocated_units)
@@ -608,11 +609,19 @@ mod tests {
 
         assert_eq!(total, 100);
         assert_eq!(
-            allocations.iter().find(|item| item.worker_id == worker_a).unwrap().reward_units,
+            allocations
+                .iter()
+                .find(|item| item.worker_id == worker_a)
+                .unwrap()
+                .reward_units,
             67
         );
         assert_eq!(
-            allocations.iter().find(|item| item.worker_id == worker_b).unwrap().reward_units,
+            allocations
+                .iter()
+                .find(|item| item.worker_id == worker_b)
+                .unwrap()
+                .reward_units,
             33
         );
     }
