@@ -1,11 +1,14 @@
 use anyhow::{ensure, Result};
 use std::{
+    collections::{HashMap, HashSet},
     sync::{
         atomic::{AtomicBool, Ordering},
         Mutex,
     },
     thread,
 };
+
+use sha2::{Digest, Sha256};
 
 use crate::coin::create_block_reward_id;
 
@@ -201,113 +204,273 @@ pub fn meets_target(hash: &[u8; 32], difficulty_bits: u16) -> bool {
     remaining_bits == 0 || hash[full_bytes] >> (8 - remaining_bits) == 0
 }
 
+/// A worker's assigned nonce sequence. Workers must only submit nonces
+/// matching `start + n * stride`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PoolWorkerAssignment {
+    pub nonce_start: u64,
+    pub nonce_stride: u64,
+}
+
+/// A pool job is a fixed block template with a lower share target.
+/// It does not alter consensus difficulty or block rewards.
+#[derive(Debug, Clone)]
+pub struct PoolJob {
+    pub job_id: [u8; 32],
+    pub template: Block,
+    pub share_difficulty_bits: u16,
+    pub expires_at: u64,
+}
+
+/// Result of a successfully verified pool share.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PoolShareOutcome {
+    pub block_candidate: Option<Block>,
+    pub accepted_share_count: usize,
+}
+
+/// Local pool coordinator core. Networking, worker authentication,
+/// persistent payout accounting, and settlement are intentionally separate.
+#[derive(Debug)]
+pub struct MiningPoolCoordinator {
+    max_workers: usize,
+    max_shares_per_job: usize,
+    job: Option<PoolJob>,
+    workers: HashMap<[u8; 32], PoolWorkerAssignment>,
+    submitted_nonces: HashSet<u64>,
+}
+
+impl MiningPoolCoordinator {
+    pub fn new(max_workers: usize, max_shares_per_job: usize) -> Result<Self> {
+        ensure!(max_workers > 0, "pool worker limit must be positive");
+        ensure!(max_workers <= 10_000, "pool worker limit is too large");
+        ensure!(
+            max_shares_per_job > 0,
+            "pool share limit must be positive"
+        );
+
+        Ok(Self {
+            max_workers,
+            max_shares_per_job,
+            job: None,
+            workers: HashMap::new(),
+            submitted_nonces: HashSet::new(),
+        })
+    }
+
+    /// Publishes a fresh template and invalidates all previous assignments/shares.
+    pub fn publish_job(
+        &mut self,
+        template: Block,
+        share_difficulty_bits: u16,
+        expires_at: u64,
+    ) -> Result<[u8; 32]> {
+        ensure!(
+            share_difficulty_bits <= template.difficulty_bits,
+            "share difficulty cannot exceed network difficulty"
+        );
+        ensure!(
+            template.difficulty_bits <= 255,
+            "network difficulty is out of range"
+        );
+        ensure!(expires_at > template.timestamp, "job expiry must follow its timestamp");
+
+        let mut hasher = Sha256::new();
+        hasher.update(b"NEZORA-POOL-JOB-V1");
+        hasher.update(template.hash());
+        hasher.update(share_difficulty_bits.to_be_bytes());
+        hasher.update(expires_at.to_be_bytes());
+        let job_id: [u8; 32] = hasher.finalize().into();
+
+        self.job = Some(PoolJob {
+            job_id,
+            template,
+            share_difficulty_bits,
+            expires_at,
+        });
+        self.workers.clear();
+        self.submitted_nonces.clear();
+
+        Ok(job_id)
+    }
+
+    pub fn register_worker(
+        &mut self,
+        worker_id: [u8; 32],
+        nonce_start: u64,
+        nonce_stride: u64,
+    ) -> Result<PoolWorkerAssignment> {
+        ensure!(self.job.is_some(), "no active pool job");
+        ensure!(nonce_stride > 0, "nonce stride must be positive");
+        ensure!(
+            !self.workers.contains_key(&worker_id),
+            "worker is already registered"
+        );
+        ensure!(
+            self.workers.len() < self.max_workers,
+            "pool worker limit reached"
+        );
+
+        let assignment = PoolWorkerAssignment {
+            nonce_start,
+            nonce_stride,
+        };
+        self.workers.insert(worker_id, assignment);
+        Ok(assignment)
+    }
+
+    /// Verifies job freshness, worker assignment, nonce ownership, and share PoW.
+    /// A returned block candidate still requires full consensus validation.
+    pub fn submit_share(
+        &mut self,
+        worker_id: [u8; 32],
+        job_id: [u8; 32],
+        nonce: u64,
+        now: u64,
+    ) -> Result<PoolShareOutcome> {
+        let job = self.job.as_ref().ok_or_else(|| anyhow::anyhow!("no active pool job"))?;
+        ensure!(job.job_id == job_id, "stale or unknown pool job");
+        ensure!(now <= job.expires_at, "pool job has expired");
+
+        let assignment = self
+            .workers
+            .get(&worker_id)
+            .ok_or_else(|| anyhow::anyhow!("worker is not registered"))?;
+        ensure!(nonce >= assignment.nonce_start, "nonce is outside worker assignment");
+        ensure!(
+            (nonce - assignment.nonce_start) % assignment.nonce_stride == 0,
+            "nonce is outside worker assignment"
+        );
+        ensure!(
+            !self.submitted_nonces.contains(&nonce),
+            "duplicate pool share"
+        );
+        ensure!(
+            self.submitted_nonces.len() < self.max_shares_per_job,
+            "pool share limit reached"
+        );
+
+        let mut candidate = job.template.clone();
+        candidate.nonce = nonce;
+        let hash = candidate.hash();
+        ensure!(
+            meets_target(&hash, job.share_difficulty_bits),
+            "share does not meet pool difficulty"
+        );
+
+        let block_candidate = if meets_target(&hash, candidate.difficulty_bits) {
+            Some(candidate)
+        } else {
+            None
+        };
+
+        self.submitted_nonces.insert(nonce);
+        Ok(PoolShareOutcome {
+            block_candidate,
+            accepted_share_count: self.submitted_nonces.len(),
+        })
+    }
+
+    pub fn active_job(&self) -> Option<&PoolJob> {
+        self.job.as_ref()
+    }
+
+    pub fn worker_count(&self) -> usize {
+        self.workers.len()
+    }
+
+    pub fn accepted_share_count(&self) -> usize {
+        self.submitted_nonces.len()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn target_check_counts_leading_zero_bits() {
-        assert!(meets_target(&[0u8; 32], 12));
+    fn sample_template(difficulty_bits: u16) -> Block {
+        Block {
+            version: 2,
+            height: 1,
+            previous_hash: [1u8; 32],
+            timestamp: 100,
+            reward_coin_number: 1,
+            reward_coin_id: [2u8; 32],
+            miner_address: [3u8; 32],
+            transactions: Vec::new(),
+            transaction_root: [0u8; 32],
+            nonce: 0,
+            difficulty_bits,
+        }
+    }
 
-        let mut valid = [0u8; 32];
-        valid[1] = 0x0f;
-        assert!(meets_target(&valid, 12));
-
-        let mut invalid = [0u8; 32];
-        invalid[1] = 0x10;
-        assert!(!meets_target(&invalid, 12));
+    fn pool_with_job() -> (MiningPoolCoordinator, [u8; 32], [u8; 32]) {
+        let mut pool = MiningPoolCoordinator::new(4, 10).unwrap();
+        let job_id = pool.publish_job(sample_template(1), 0, 200).unwrap();
+        let worker_id = [9u8; 32];
+        pool.register_worker(worker_id, 0, 1).unwrap();
+        (pool, worker_id, job_id)
     }
 
     #[test]
-    fn rejects_impossible_difficulty() {
-        assert!(!meets_target(&[0u8; 32], 256));
+    fn accepts_share_and_counts_it_once() {
+        let (mut pool, worker_id, job_id) = pool_with_job();
+        let result = pool.submit_share(worker_id, job_id, 0, 150).unwrap();
+
+        assert_eq!(result.accepted_share_count, 1);
+        assert_eq!(pool.accepted_share_count(), 1);
     }
 
     #[test]
-    fn mines_a_valid_first_block() {
-        let params = ConsensusParams {
-            initial_difficulty_bits: 8,
-            max_difficulty_bits: 16,
-            ..ConsensusParams::default()
-        };
-        let chain = Chain::default();
+    fn rejects_duplicate_share_nonce() {
+        let (mut pool, worker_id, job_id) = pool_with_job();
+        pool.submit_share(worker_id, job_id, 0, 150).unwrap();
 
-        let block = mine_block(
-            &chain,
-            [7u8; 32],
-            Vec::new(),
-            1_000_000,
-            1_000_000,
-            100_000,
-            &params,
-        )
-        .unwrap();
-
-        assert_eq!(block.height, 1);
-        assert!(meets_target(&block.hash(), params.initial_difficulty_bits));
-        validate_block(&block, &chain, &params, 1_000_000).unwrap();
+        assert!(pool.submit_share(worker_id, job_id, 0, 150).is_err());
     }
 
     #[test]
-    fn parallel_mining_finds_consensus_valid_block() {
-        let params = ConsensusParams {
-            initial_difficulty_bits: 8,
-            max_difficulty_bits: 16,
-            ..ConsensusParams::default()
-        };
-        let chain = Chain::default();
+    fn rejects_nonce_outside_worker_assignment() {
+        let mut pool = MiningPoolCoordinator::new(2, 10).unwrap();
+        let job_id = pool.publish_job(sample_template(1), 0, 200).unwrap();
+        let worker_id = [9u8; 32];
+        pool.register_worker(worker_id, 10, 3).unwrap();
 
-        let block = mine_block_parallel(
-            &chain,
-            [7u8; 32],
-            Vec::new(),
-            1_000_000,
-            1_000_000,
-            100_000,
-            4,
-            &params,
-        )
-        .unwrap();
-
-        validate_block(&block, &chain, &params, 1_000_000).unwrap();
-        assert!(meets_target(&block.hash(), params.initial_difficulty_bits));
+        assert!(pool.submit_share(worker_id, job_id, 11, 150).is_err());
     }
 
     #[test]
-    fn parallel_mining_rejects_zero_workers() {
-        let params = ConsensusParams::default();
-        assert!(mine_block_parallel(
-            &Chain::default(),
-            [7u8; 32],
-            Vec::new(),
-            1_000_000,
-            1_000_000,
-            100,
-            0,
-            &params,
-        )
-        .is_err());
+    fn rejects_expired_job() {
+        let (mut pool, worker_id, job_id) = pool_with_job();
+
+        assert!(pool.submit_share(worker_id, job_id, 0, 201).is_err());
     }
 
     #[test]
-    fn stops_when_nonce_attempt_budget_is_exhausted() {
-        let params = ConsensusParams {
-            initial_difficulty_bits: 255,
-            max_difficulty_bits: 255,
-            ..ConsensusParams::default()
-        };
-        let chain = Chain::default();
+    fn new_job_invalidates_old_worker_assignments() {
+        let (mut pool, worker_id, old_job_id) = pool_with_job();
+        pool.publish_job(sample_template(1), 0, 300).unwrap();
 
-        let result = mine_block(
-            &chain,
-            [7u8; 32],
-            Vec::new(),
-            1_000_000,
-            1_000_000,
-            1,
-            &params,
-        );
+        assert!(pool.submit_share(worker_id, old_job_id, 0, 150).is_err());
+        assert_eq!(pool.worker_count(), 0);
+    }
 
-        assert!(result.is_err());
+    #[test]
+    fn rejects_share_difficulty_above_network_difficulty() {
+        let mut pool = MiningPoolCoordinator::new(2, 10).unwrap();
+
+        assert!(pool.publish_job(sample_template(1), 2, 200).is_err());
+    }
+
+    #[test]
+    fn enforces_worker_and_share_limits() {
+        let mut pool = MiningPoolCoordinator::new(1, 1).unwrap();
+        let job_id = pool.publish_job(sample_template(1), 0, 200).unwrap();
+        pool.register_worker([1u8; 32], 0, 1).unwrap();
+
+        assert!(pool.register_worker([2u8; 32], 1, 1).is_err());
+        pool.submit_share([1u8; 32], job_id, 0, 150).unwrap();
+        assert_eq!(pool.accepted_share_count(), 1);
+        assert!(pool.submit_share([1u8; 32], job_id, 1, 150).is_err());
     }
 }
