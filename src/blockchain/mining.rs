@@ -244,10 +244,7 @@ impl MiningPoolCoordinator {
     pub fn new(max_workers: usize, max_shares_per_job: usize) -> Result<Self> {
         ensure!(max_workers > 0, "pool worker limit must be positive");
         ensure!(max_workers <= 10_000, "pool worker limit is too large");
-        ensure!(
-            max_shares_per_job > 0,
-            "pool share limit must be positive"
-        );
+        ensure!(max_shares_per_job > 0, "pool share limit must be positive");
 
         Ok(Self {
             max_workers,
@@ -273,7 +270,10 @@ impl MiningPoolCoordinator {
             template.difficulty_bits <= 255,
             "network difficulty is out of range"
         );
-        ensure!(expires_at > template.timestamp, "job expiry must follow its timestamp");
+        ensure!(
+            expires_at > template.timestamp,
+            "job expiry must follow its timestamp"
+        );
 
         let mut hasher = Sha256::new();
         hasher.update(b"NEZORA-POOL-JOB-V1");
@@ -328,7 +328,10 @@ impl MiningPoolCoordinator {
         nonce: u64,
         now: u64,
     ) -> Result<PoolShareOutcome> {
-        let job = self.job.as_ref().ok_or_else(|| anyhow::anyhow!("no active pool job"))?;
+        let job = self
+            .job
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no active pool job"))?;
         ensure!(job.job_id == job_id, "stale or unknown pool job");
         ensure!(now <= job.expires_at, "pool job has expired");
 
@@ -336,7 +339,10 @@ impl MiningPoolCoordinator {
             .workers
             .get(&worker_id)
             .ok_or_else(|| anyhow::anyhow!("worker is not registered"))?;
-        ensure!(nonce >= assignment.nonce_start, "nonce is outside worker assignment");
+        ensure!(
+            nonce >= assignment.nonce_start,
+            "nonce is outside worker assignment"
+        );
         ensure!(
             (nonce - assignment.nonce_start) % assignment.nonce_stride == 0,
             "nonce is outside worker assignment"
