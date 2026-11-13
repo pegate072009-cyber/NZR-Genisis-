@@ -24,13 +24,8 @@ pub enum PoolTcpRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", deny_unknown_fields, rename_all = "snake_case")]
 pub enum PoolTcpResponse {
-    Pong {
-        protocol: String,
-        version: u16,
-    },
-    Error {
-        message: String,
-    },
+    Pong { protocol: String, version: u16 },
+    Error { message: String },
 }
 
 /// Small, sequential TCP listener for the first pool-networking milestone.
@@ -49,7 +44,10 @@ impl PoolTcpServer {
 
     /// Binds a loopback-only listener. Non-loopback addresses are rejected.
     pub fn bind(address: SocketAddr) -> Result<Self> {
-        ensure!(address.ip().is_loopback(), "pool TCP server must bind to a loopback address");
+        ensure!(
+            address.ip().is_loopback(),
+            "pool TCP server must bind to a loopback address"
+        );
         let listener = TcpListener::bind(address)
             .with_context(|| format!("could not bind pool TCP listener to {address}"))?;
         Ok(Self { listener })
@@ -92,7 +90,10 @@ fn read_frame(stream: &mut TcpStream) -> Result<Vec<u8>> {
             Ok(0) => anyhow::bail!("pool TCP client closed before sending a complete frame"),
             Ok(_) if byte[0] == b'\n' => break,
             Ok(_) => {
-                ensure!(frame.len() < MAX_POOL_TCP_FRAME_BYTES, "pool TCP frame exceeds the size limit");
+                ensure!(
+                    frame.len() < MAX_POOL_TCP_FRAME_BYTES,
+                    "pool TCP frame exceeds the size limit"
+                );
                 frame.push(byte[0]);
             }
             Err(error) => return Err(error).context("could not read pool TCP frame"),
@@ -151,7 +152,11 @@ fn handle_connection(stream: &mut TcpStream) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{io::{BufRead, BufReader}, net::TcpStream, thread};
+    use std::{
+        io::{BufRead, BufReader},
+        net::TcpStream,
+        thread,
+    };
 
     #[test]
     fn binds_only_to_loopback() {
