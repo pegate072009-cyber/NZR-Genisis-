@@ -1,8 +1,12 @@
-use anyhow::{ensure, Result};
+use anyhow::{ensure, Context, Result};
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    fs::{self, OpenOptions},
+    io::Write,
+    path::Path,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Mutex,
     },
     thread,
@@ -206,7 +210,7 @@ pub fn meets_target(hash: &[u8; 32], difficulty_bits: u16) -> bool {
 
 /// A worker's assigned nonce sequence. Workers must only submit nonces
 /// matching `start + n * stride`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PoolWorkerAssignment {
     pub nonce_start: u64,
     pub nonce_stride: u64,
@@ -214,7 +218,7 @@ pub struct PoolWorkerAssignment {
 
 /// A pool job is a fixed block template with a lower share target.
 /// It does not alter consensus difficulty or block rewards.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolJob {
     pub job_id: [u8; 32],
     pub template: Block,
@@ -245,6 +249,47 @@ pub const DEFAULT_POOL_FEE_BASIS_POINTS: u16 = 100;
 pub const DEFAULT_PPLNS_WINDOW_SIZE: usize = 1_000;
 const BASIS_POINTS_DENOMINATOR: u128 = 10_000;
 
+const POOL_STATE_FORMAT_VERSION: u32 = 1;
+const MAX_POOL_STATE_FILE_BYTES: u64 = 64 * 1024 * 1024;
+static POOL_STATE_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PoolPersistenceEnvelope {
+    format_version: u32,
+    payload: PoolPersistencePayload,
+    checksum: [u8; 32],
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PoolPersistencePayload {
+    max_workers: usize,
+    max_shares_per_job: usize,
+    job: Option<PoolJob>,
+    workers: Vec<PoolPersistedWorker>,
+    submitted_nonces: Vec<u64>,
+    worker_share_counts: Vec<PoolPersistedWorkerShareCount>,
+    pplns_window_size: usize,
+    pool_fee_basis_points: u16,
+    pplns_share_window: Vec<[u8; 32]>,
+    pplns_share_difficulty_bits: Option<u16>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PoolPersistedWorker {
+    worker_id: [u8; 32],
+    assignment: PoolWorkerAssignment,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PoolPersistedWorkerShareCount {
+    worker_id: [u8; 32],
+    accepted_shares: u64,
+}
+
 /// PPLNS reward calculation output. The fee is accounted for separately;
 /// allocations plus the fee always equal the gross reward.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -257,7 +302,7 @@ pub struct PoolPplnsReward {
 
 /// Local pool coordinator core. Networking, worker authentication,
 /// persistent payout accounting, and settlement are intentionally separate.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MiningPoolCoordinator {
     max_workers: usize,
     max_shares_per_job: usize,
@@ -272,6 +317,301 @@ pub struct MiningPoolCoordinator {
 }
 
 impl MiningPoolCoordinator {
+    /// Saves the complete pool coordinator state in a versioned JSON envelope.
+    ///
+    /// The checksum detects accidental corruption; it is not a keyed
+    /// authentication code and does not protect against a malicious editor
+    /// who can rewrite both the state and its checksum.
+    pub fn save_to_file(&self, path: &Path) -> Result<()> {
+        let mut workers: Vec<PoolPersistedWorker> = self
+            .workers
+            .iter()
+            .map(|(worker_id, assignment)| PoolPersistedWorker {
+                worker_id: *worker_id,
+                assignment: *assignment,
+            })
+            .collect();
+        workers.sort_by_key(|worker| worker.worker_id);
+
+        let mut worker_share_counts: Vec<PoolPersistedWorkerShareCount> = self
+            .worker_share_counts
+            .iter()
+            .map(|(worker_id, accepted_shares)| PoolPersistedWorkerShareCount {
+                worker_id: *worker_id,
+                accepted_shares: *accepted_shares,
+            })
+            .collect();
+        worker_share_counts.sort_by_key(|entry| entry.worker_id);
+
+        let mut submitted_nonces: Vec<u64> =
+            self.submitted_nonces.iter().copied().collect();
+        submitted_nonces.sort_unstable();
+
+        let payload = PoolPersistencePayload {
+            max_workers: self.max_workers,
+            max_shares_per_job: self.max_shares_per_job,
+            job: self.job.clone(),
+            workers,
+            submitted_nonces,
+            worker_share_counts,
+            pplns_window_size: self.pplns_window_size,
+            pool_fee_basis_points: self.pool_fee_basis_points,
+            pplns_share_window: self.pplns_share_window.iter().copied().collect(),
+            pplns_share_difficulty_bits: self.pplns_share_difficulty_bits,
+        };
+        let payload_bytes = serde_json::to_vec(&payload)?;
+        let mut hasher = Sha256::new();
+        hasher.update(b"NEZORA-POOL-STATE-CHECKSUM-V1");
+        hasher.update(&payload_bytes);
+        let envelope = PoolPersistenceEnvelope {
+            format_version: POOL_STATE_FORMAT_VERSION,
+            payload,
+            checksum: hasher.finalize().into(),
+        };
+        let bytes = serde_json::to_vec_pretty(&envelope)?;
+        ensure!(
+            bytes.len() as u64 <= MAX_POOL_STATE_FILE_BYTES,
+            "pool state file exceeds the size limit"
+        );
+
+        let parent = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        fs::create_dir_all(parent).with_context(|| {
+            format!("could not create pool state directory {}", parent.display())
+        })?;
+
+        let file_name = path
+            .file_name()
+            .ok_or_else(|| anyhow::anyhow!("pool state path must include a file name"))?
+            .to_string_lossy();
+        let counter = POOL_STATE_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let temporary_path = path.with_file_name(format!(
+            "{file_name}.tmp-{}-{counter}",
+            std::process::id()
+        ));
+
+        let write_result = (|| -> Result<()> {
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temporary_path)
+                .with_context(|| {
+                    format!(
+                        "could not create temporary pool state file {}",
+                        temporary_path.display()
+                    )
+                })?;
+            file.write_all(&bytes)
+                .context("could not write pool state file")?;
+            file.sync_all()
+                .context("could not flush pool state file to disk")?;
+            fs::rename(&temporary_path, path).with_context(|| {
+                format!(
+                    "could not atomically replace pool state file {}",
+                    path.display()
+                )
+            })?;
+            Ok(())
+        })();
+
+        if write_result.is_err() {
+            let _ = fs::remove_file(&temporary_path);
+        }
+        write_result
+    }
+
+    /// Loads and validates a previously saved pool coordinator state.
+    /// Current-job nonces are restored so an already accepted share cannot
+    /// be credited again after a restart.
+    pub fn load_from_file(path: &Path) -> Result<Self> {
+        let metadata = fs::metadata(path)
+            .with_context(|| format!("could not read pool state metadata {}", path.display()))?;
+        ensure!(
+            metadata.len() <= MAX_POOL_STATE_FILE_BYTES,
+            "pool state file exceeds the size limit"
+        );
+
+        let bytes = fs::read(path)
+            .with_context(|| format!("could not read pool state file {}", path.display()))?;
+        ensure!(
+            bytes.len() as u64 <= MAX_POOL_STATE_FILE_BYTES,
+            "pool state file exceeds the size limit"
+        );
+
+        let envelope: PoolPersistenceEnvelope = serde_json::from_slice(&bytes)
+            .context("pool state file is not valid versioned JSON")?;
+        ensure!(
+            envelope.format_version == POOL_STATE_FORMAT_VERSION,
+            "unsupported pool state format version"
+        );
+
+        let payload_bytes = serde_json::to_vec(&envelope.payload)?;
+        let mut hasher = Sha256::new();
+        hasher.update(b"NEZORA-POOL-STATE-CHECKSUM-V1");
+        hasher.update(&payload_bytes);
+        let expected_checksum: [u8; 32] = hasher.finalize().into();
+        ensure!(
+            envelope.checksum == expected_checksum,
+            "pool state checksum mismatch"
+        );
+
+        Self::restore_payload(envelope.payload)
+    }
+
+    fn restore_payload(payload: PoolPersistencePayload) -> Result<Self> {
+        ensure!(payload.max_workers > 0, "saved pool worker limit must be positive");
+        ensure!(
+            payload.max_workers <= 10_000,
+            "saved pool worker limit exceeds the safety limit"
+        );
+        ensure!(
+            payload.max_shares_per_job > 0,
+            "saved pool share limit must be positive"
+        );
+        ensure!(
+            payload.pplns_window_size > 0 && payload.pplns_window_size <= 1_000_000,
+            "saved PPLNS window size is invalid"
+        );
+        ensure!(
+            u128::from(payload.pool_fee_basis_points) <= BASIS_POINTS_DENOMINATOR,
+            "saved pool fee exceeds 100 percent"
+        );
+        ensure!(
+            payload.workers.len() <= payload.max_workers,
+            "saved worker count exceeds configured limit"
+        );
+        ensure!(
+            payload.submitted_nonces.len() <= payload.max_shares_per_job,
+            "saved share count exceeds configured limit"
+        );
+        ensure!(
+            payload.pplns_share_window.len() <= payload.pplns_window_size,
+            "saved PPLNS history exceeds configured window"
+        );
+
+        let mut workers = HashMap::with_capacity(payload.workers.len());
+        for entry in payload.workers {
+            ensure!(
+                entry.assignment.nonce_stride > 0,
+                "saved worker nonce stride must be positive"
+            );
+            ensure!(
+                workers.insert(entry.worker_id, entry.assignment).is_none(),
+                "saved pool state contains duplicate workers"
+            );
+        }
+
+        let mut submitted_nonces = HashSet::with_capacity(payload.submitted_nonces.len());
+        for nonce in payload.submitted_nonces {
+            ensure!(
+                submitted_nonces.insert(nonce),
+                "saved pool state contains duplicate submitted nonces"
+            );
+        }
+
+        let mut worker_share_counts = HashMap::with_capacity(payload.worker_share_counts.len());
+        let mut total_worker_shares = 0u128;
+        for entry in payload.worker_share_counts {
+            ensure!(
+                workers.contains_key(&entry.worker_id),
+                "saved share count references an unknown worker"
+            );
+            total_worker_shares = total_worker_shares
+                .checked_add(u128::from(entry.accepted_shares))
+                .ok_or_else(|| anyhow::anyhow!("saved worker share total overflow"))?;
+            ensure!(
+                worker_share_counts
+                    .insert(entry.worker_id, entry.accepted_shares)
+                    .is_none(),
+                "saved pool state contains duplicate worker share records"
+            );
+        }
+
+        ensure!(
+            worker_share_counts.len() == workers.len(),
+            "saved worker assignments and share records do not match"
+        );
+        ensure!(
+            total_worker_shares == submitted_nonces.len() as u128,
+            "saved worker share total does not match submitted nonces"
+        );
+
+        match &payload.job {
+            Some(job) => {
+                ensure!(
+                    job.template.difficulty_bits <= 255,
+                    "saved network difficulty is out of range"
+                );
+                ensure!(
+                    job.share_difficulty_bits <= job.template.difficulty_bits,
+                    "saved pool share difficulty exceeds network difficulty"
+                );
+                ensure!(
+                    job.expires_at > job.template.timestamp,
+                    "saved pool job expiry is invalid"
+                );
+                ensure!(
+                    payload.pplns_share_difficulty_bits == Some(job.share_difficulty_bits),
+                    "saved PPLNS difficulty does not match the active job"
+                );
+
+                let mut hasher = Sha256::new();
+                hasher.update(b"NEZORA-POOL-JOB-V1");
+                hasher.update(job.template.hash());
+                hasher.update(job.share_difficulty_bits.to_be_bytes());
+                hasher.update(job.expires_at.to_be_bytes());
+                let expected_job_id: [u8; 32] = hasher.finalize().into();
+                ensure!(
+                    job.job_id == expected_job_id,
+                    "saved pool job identifier is invalid"
+                );
+            }
+            None => {
+                ensure!(
+                    workers.is_empty()
+                        && submitted_nonces.is_empty()
+                        && worker_share_counts.is_empty()
+                        && payload.pplns_share_window.is_empty()
+                        && payload.pplns_share_difficulty_bits.is_none(),
+                    "saved pool state has accounting data without an active job"
+                );
+            }
+        }
+
+        Ok(Self {
+            max_workers: payload.max_workers,
+            max_shares_per_job: payload.max_shares_per_job,
+            job: payload.job,
+            workers,
+            submitted_nonces,
+            worker_share_counts,
+            pplns_window_size: payload.pplns_window_size,
+            pool_fee_basis_points: payload.pool_fee_basis_points,
+            pplns_share_window: payload.pplns_share_window.into(),
+            pplns_share_difficulty_bits: payload.pplns_share_difficulty_bits,
+        })
+    }
+
+    /// Accepts a share and persists the resulting state before committing it
+    /// to this in-memory coordinator. If validation or disk writing fails,
+    /// the current in-memory state is left unchanged.
+    pub fn submit_share_and_save(
+        &mut self,
+        worker_id: [u8; 32],
+        job_id: [u8; 32],
+        nonce: u64,
+        now: u64,
+        path: &Path,
+    ) -> Result<PoolShareOutcome> {
+        let mut updated = self.clone();
+        let outcome = updated.submit_share(worker_id, job_id, nonce, now)?;
+        updated.save_to_file(path)?;
+        *self = updated;
+        Ok(outcome)
+    }
+
     pub fn new(max_workers: usize, max_shares_per_job: usize) -> Result<Self> {
         Self::new_with_pplns_config(
             max_workers,
@@ -869,5 +1209,62 @@ mod tests {
     fn rejects_pplns_reward_calculation_without_window_shares() {
         let pool = MiningPoolCoordinator::new_with_pplns_config(2, 10, 5, 100).unwrap();
         assert!(pool.calculate_pplns_reward_allocations(10_000).is_err());
+    }
+
+    #[test]
+    fn restores_pool_state_and_rejects_replayed_share_after_restart() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("pool-state.json");
+        let (mut pool, worker_id, job_id) = pool_with_job();
+
+        pool.submit_share_and_save(worker_id, job_id, 0, 150, &path)
+            .unwrap();
+
+        let mut restored = MiningPoolCoordinator::load_from_file(&path).unwrap();
+        assert_eq!(restored.accepted_share_count(), 1);
+        assert_eq!(restored.worker_accepted_share_count(&worker_id), Some(1));
+        assert_eq!(restored.pplns_window_len(), 1);
+        assert!(restored.submit_share(worker_id, job_id, 0, 151).is_err());
+
+        restored
+            .submit_share_and_save(worker_id, job_id, 1, 151, &path)
+            .unwrap();
+        let restored_again = MiningPoolCoordinator::load_from_file(&path).unwrap();
+        assert_eq!(restored_again.accepted_share_count(), 2);
+        assert_eq!(
+            restored_again.worker_accepted_share_count(&worker_id),
+            Some(2)
+        );
+        assert_eq!(restored_again.pplns_window_len(), 2);
+    }
+
+    #[test]
+    fn rejects_pool_state_with_modified_payload_checksum() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("pool-state.json");
+        let (pool, _, _) = pool_with_job();
+        pool.save_to_file(&path).unwrap();
+
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        value["payload"]["pool_fee_basis_points"] = serde_json::json!(200);
+        fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+
+        assert!(MiningPoolCoordinator::load_from_file(&path).is_err());
+    }
+
+    #[test]
+    fn rejects_pool_state_with_unsupported_version() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("pool-state.json");
+        let (pool, _, _) = pool_with_job();
+        pool.save_to_file(&path).unwrap();
+
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        value["format_version"] = serde_json::json!(POOL_STATE_FORMAT_VERSION + 1);
+        fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+
+        assert!(MiningPoolCoordinator::load_from_file(&path).is_err());
     }
 }
