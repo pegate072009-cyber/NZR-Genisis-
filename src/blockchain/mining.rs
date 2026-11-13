@@ -1,6 +1,6 @@
 use anyhow::{ensure, Result};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     sync::{
         atomic::{AtomicBool, Ordering},
         Mutex,
@@ -239,6 +239,22 @@ pub struct PoolRewardAllocation {
     pub reward_units: u64,
 }
 
+/// Default pool fee: 100 basis points (1%).
+pub const DEFAULT_POOL_FEE_BASIS_POINTS: u16 = 100;
+/// Default PPLNS window: the most recent 1,000 accepted shares.
+pub const DEFAULT_PPLNS_WINDOW_SIZE: usize = 1_000;
+const BASIS_POINTS_DENOMINATOR: u128 = 10_000;
+
+/// PPLNS reward calculation output. The fee is accounted for separately;
+/// allocations plus the fee always equal the gross reward.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PoolPplnsReward {
+    pub gross_reward_units: u64,
+    pub pool_fee_units: u64,
+    pub miner_reward_units: u64,
+    pub allocations: Vec<PoolRewardAllocation>,
+}
+
 /// Local pool coordinator core. Networking, worker authentication,
 /// persistent payout accounting, and settlement are intentionally separate.
 #[derive(Debug)]
@@ -249,13 +265,40 @@ pub struct MiningPoolCoordinator {
     workers: HashMap<[u8; 32], PoolWorkerAssignment>,
     submitted_nonces: HashSet<u64>,
     worker_share_counts: HashMap<[u8; 32], u64>,
+    pplns_window_size: usize,
+    pool_fee_basis_points: u16,
+    pplns_share_window: VecDeque<[u8; 32]>,
+    pplns_share_difficulty_bits: Option<u16>,
 }
 
 impl MiningPoolCoordinator {
     pub fn new(max_workers: usize, max_shares_per_job: usize) -> Result<Self> {
+        Self::new_with_pplns_config(
+            max_workers,
+            max_shares_per_job,
+            DEFAULT_PPLNS_WINDOW_SIZE,
+            DEFAULT_POOL_FEE_BASIS_POINTS,
+        )
+    }
+
+    pub fn new_with_pplns_config(
+        max_workers: usize,
+        max_shares_per_job: usize,
+        pplns_window_size: usize,
+        pool_fee_basis_points: u16,
+    ) -> Result<Self> {
         ensure!(max_workers > 0, "pool worker limit must be positive");
         ensure!(max_workers <= 10_000, "pool worker limit is too large");
         ensure!(max_shares_per_job > 0, "pool share limit must be positive");
+        ensure!(pplns_window_size > 0, "PPLNS window size must be positive");
+        ensure!(
+            pplns_window_size <= 1_000_000,
+            "PPLNS window size exceeds the safety limit"
+        );
+        ensure!(
+            u128::from(pool_fee_basis_points) <= BASIS_POINTS_DENOMINATOR,
+            "pool fee cannot exceed 100 percent"
+        );
 
         Ok(Self {
             max_workers,
@@ -264,6 +307,10 @@ impl MiningPoolCoordinator {
             workers: HashMap::new(),
             submitted_nonces: HashSet::new(),
             worker_share_counts: HashMap::new(),
+            pplns_window_size,
+            pool_fee_basis_points,
+            pplns_share_window: VecDeque::with_capacity(pplns_window_size.min(4_096)),
+            pplns_share_difficulty_bits: None,
         })
     }
 
@@ -286,6 +333,17 @@ impl MiningPoolCoordinator {
             expires_at > template.timestamp,
             "job expiry must follow its timestamp"
         );
+
+        if self
+            .pplns_share_difficulty_bits
+            .map(|previous| previous != share_difficulty_bits)
+            .unwrap_or(false)
+        {
+            // Shares with different targets represent different expected work.
+            // Reset rather than mixing incompatible share weights.
+            self.pplns_share_window.clear();
+        }
+        self.pplns_share_difficulty_bits = Some(share_difficulty_bits);
 
         let mut hasher = Sha256::new();
         hasher.update(b"NEZORA-POOL-JOB-V1");
@@ -384,19 +442,26 @@ impl MiningPoolCoordinator {
             None
         };
 
-        self.submitted_nonces.insert(nonce);
-        let worker_share_count = self
+        let next_worker_share_count = self
             .worker_share_counts
-            .get_mut(&worker_id)
-            .ok_or_else(|| anyhow::anyhow!("worker share accounting entry is missing"))?;
-        *worker_share_count = worker_share_count
+            .get(&worker_id)
+            .copied()
+            .ok_or_else(|| anyhow::anyhow!("worker share accounting entry is missing"))?
             .checked_add(1)
             .ok_or_else(|| anyhow::anyhow!("worker share count overflow"))?;
+
+        self.submitted_nonces.insert(nonce);
+        self.worker_share_counts
+            .insert(worker_id, next_worker_share_count);
+        self.pplns_share_window.push_back(worker_id);
+        if self.pplns_share_window.len() > self.pplns_window_size {
+            self.pplns_share_window.pop_front();
+        }
 
         Ok(PoolShareOutcome {
             block_candidate,
             accepted_share_count: self.submitted_nonces.len(),
-            worker_accepted_share_count: *worker_share_count,
+            worker_accepted_share_count: next_worker_share_count,
         })
     }
 
@@ -416,9 +481,98 @@ impl MiningPoolCoordinator {
         self.worker_share_counts.get(worker_id).copied()
     }
 
+    pub fn pplns_window_len(&self) -> usize {
+        self.pplns_share_window.len()
+    }
+
+    pub fn pool_fee_basis_points(&self) -> u16 {
+        self.pool_fee_basis_points
+    }
+
+    /// Calculates a PPLNS allocation from the most recent accepted shares.
+    /// The configured pool fee is deducted first using integer floor rounding.
+    /// Shares are kept only when their pool difficulty is unchanged between jobs.
+    /// This is accounting only: it does not transfer funds or alter consensus.
+    pub fn calculate_pplns_reward_allocations(
+        &self,
+        gross_reward_units: u64,
+    ) -> Result<PoolPplnsReward> {
+        ensure!(
+            !self.pplns_share_window.is_empty(),
+            "cannot allocate PPLNS reward without accepted shares"
+        );
+
+        let mut share_counts: HashMap<[u8; 32], u64> = HashMap::new();
+        for worker_id in &self.pplns_share_window {
+            let count = share_counts.entry(*worker_id).or_insert(0);
+            *count = count
+                .checked_add(1)
+                .ok_or_else(|| anyhow::anyhow!("PPLNS share count overflow"))?;
+        }
+
+        let total_shares = self.pplns_share_window.len() as u128;
+        let pool_fee_units = ((u128::from(gross_reward_units)
+            * u128::from(self.pool_fee_basis_points))
+            / BASIS_POINTS_DENOMINATOR) as u64;
+        let miner_reward_units = gross_reward_units
+            .checked_sub(pool_fee_units)
+            .ok_or_else(|| anyhow::anyhow!("pool fee exceeds gross reward"))?;
+
+        let mut allocations = Vec::with_capacity(share_counts.len());
+        let mut remainders = Vec::with_capacity(share_counts.len());
+        let mut allocated_units = 0u64;
+
+        for (worker_id, shares) in share_counts {
+            let numerator = u128::from(miner_reward_units) * u128::from(shares);
+            let base_units = (numerator / total_shares) as u64;
+            let remainder = numerator % total_shares;
+            allocated_units = allocated_units
+                .checked_add(base_units)
+                .ok_or_else(|| anyhow::anyhow!("PPLNS allocation overflow"))?;
+
+            allocations.push(PoolRewardAllocation {
+                worker_id,
+                accepted_shares: shares,
+                reward_units: base_units,
+            });
+            remainders.push((worker_id, remainder));
+        }
+
+        remainders.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+
+        let leftover_units = miner_reward_units
+            .checked_sub(allocated_units)
+            .ok_or_else(|| anyhow::anyhow!("PPLNS allocations exceed miner reward"))?;
+        let leftover_count = usize::try_from(leftover_units)
+            .map_err(|_| anyhow::anyhow!("PPLNS remainder does not fit platform size"))?;
+        ensure!(
+            leftover_count <= remainders.len(),
+            "PPLNS reward remainder is invalid"
+        );
+
+        for (worker_id, _) in remainders.iter().take(leftover_count) {
+            let allocation = allocations
+                .iter_mut()
+                .find(|item| item.worker_id == *worker_id)
+                .ok_or_else(|| anyhow::anyhow!("PPLNS worker allocation is missing"))?;
+            allocation.reward_units = allocation
+                .reward_units
+                .checked_add(1)
+                .ok_or_else(|| anyhow::anyhow!("PPLNS worker reward overflow"))?;
+        }
+
+        allocations.sort_by_key(|item| item.worker_id);
+        Ok(PoolPplnsReward {
+            gross_reward_units,
+            pool_fee_units,
+            miner_reward_units,
+            allocations,
+        })
+    }
+
     /// Calculates a deterministic proportional allocation of integer reward
-    /// units. Largest remainders receive leftover units; ties use worker ID.
-    /// No funds are transferred and no blockchain reward is changed.
+    /// units for the current job only. PPLNS callers should use
+    /// `calculate_pplns_reward_allocations` instead.
     pub fn calculate_reward_allocations(
         &self,
         reward_units: u64,
@@ -642,5 +796,74 @@ mod tests {
         pool.publish_job(sample_template(1), 0, 300).unwrap();
 
         assert_eq!(pool.worker_accepted_share_count(&worker_id), None);
+    }
+
+    #[test]
+    fn pplns_window_rolls_over_and_persists_across_same_difficulty_jobs() {
+        let mut pool = MiningPoolCoordinator::new_with_pplns_config(4, 10, 3, 100).unwrap();
+        let first_job = pool.publish_job(sample_template(1), 0, 200).unwrap();
+        let worker_a = [1u8; 32];
+        let worker_b = [2u8; 32];
+        pool.register_worker(worker_a, 0, 2).unwrap();
+        pool.register_worker(worker_b, 1, 2).unwrap();
+
+        pool.submit_share(worker_a, first_job, 0, 150).unwrap();
+        pool.submit_share(worker_b, first_job, 1, 150).unwrap();
+
+        let second_job = pool.publish_job(sample_template(1), 0, 300).unwrap();
+        pool.register_worker(worker_a, 0, 2).unwrap();
+        pool.register_worker(worker_b, 1, 2).unwrap();
+        pool.submit_share(worker_b, second_job, 3, 250).unwrap();
+        pool.submit_share(worker_a, second_job, 2, 250).unwrap();
+
+        assert_eq!(pool.pplns_window_len(), 3);
+        let reward = pool.calculate_pplns_reward_allocations(10_000).unwrap();
+        assert_eq!(reward.pool_fee_units, 100);
+        assert_eq!(reward.miner_reward_units, 9_900);
+        assert_eq!(
+            reward
+                .allocations
+                .iter()
+                .find(|item| item.worker_id == worker_a)
+                .unwrap()
+                .accepted_shares,
+            1
+        );
+        assert_eq!(
+            reward
+                .allocations
+                .iter()
+                .find(|item| item.worker_id == worker_b)
+                .unwrap()
+                .accepted_shares,
+            2
+        );
+        let allocated: u64 = reward.allocations.iter().map(|item| item.reward_units).sum();
+        assert_eq!(allocated + reward.pool_fee_units, reward.gross_reward_units);
+    }
+
+    #[test]
+    fn pplns_window_resets_when_share_difficulty_changes() {
+        let mut pool = MiningPoolCoordinator::new_with_pplns_config(2, 10, 5, 100).unwrap();
+        let first_job = pool.publish_job(sample_template(2), 1, 200).unwrap();
+        let worker = [1u8; 32];
+        pool.register_worker(worker, 0, 1).unwrap();
+        pool.submit_share(worker, first_job, 0, 150).unwrap();
+        assert_eq!(pool.pplns_window_len(), 1);
+
+        pool.publish_job(sample_template(2), 2, 300).unwrap();
+        assert_eq!(pool.pplns_window_len(), 0);
+    }
+
+    #[test]
+    fn rejects_invalid_pplns_configuration() {
+        assert!(MiningPoolCoordinator::new_with_pplns_config(2, 10, 0, 100).is_err());
+        assert!(MiningPoolCoordinator::new_with_pplns_config(2, 10, 10, 10_001).is_err());
+    }
+
+    #[test]
+    fn rejects_pplns_reward_calculation_without_window_shares() {
+        let pool = MiningPoolCoordinator::new_with_pplns_config(2, 10, 5, 100).unwrap();
+        assert!(pool.calculate_pplns_reward_allocations(10_000).is_err());
     }
 }
