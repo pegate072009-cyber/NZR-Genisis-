@@ -227,6 +227,16 @@ pub struct PoolJob {
 pub struct PoolShareOutcome {
     pub block_candidate: Option<Block>,
     pub accepted_share_count: usize,
+    pub worker_accepted_share_count: u64,
+}
+
+/// A worker's share of a pool reward, expressed in the smallest integer
+/// reward units supplied by the caller. This is accounting only, not payment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PoolRewardAllocation {
+    pub worker_id: [u8; 32],
+    pub accepted_shares: u64,
+    pub reward_units: u64,
 }
 
 /// Local pool coordinator core. Networking, worker authentication,
@@ -238,6 +248,7 @@ pub struct MiningPoolCoordinator {
     job: Option<PoolJob>,
     workers: HashMap<[u8; 32], PoolWorkerAssignment>,
     submitted_nonces: HashSet<u64>,
+    worker_share_counts: HashMap<[u8; 32], u64>,
 }
 
 impl MiningPoolCoordinator {
@@ -252,6 +263,7 @@ impl MiningPoolCoordinator {
             job: None,
             workers: HashMap::new(),
             submitted_nonces: HashSet::new(),
+            worker_share_counts: HashMap::new(),
         })
     }
 
@@ -290,6 +302,7 @@ impl MiningPoolCoordinator {
         });
         self.workers.clear();
         self.submitted_nonces.clear();
+        self.worker_share_counts.clear();
 
         Ok(job_id)
     }
@@ -316,6 +329,7 @@ impl MiningPoolCoordinator {
             nonce_stride,
         };
         self.workers.insert(worker_id, assignment);
+        self.worker_share_counts.insert(worker_id, 0);
         Ok(assignment)
     }
 
@@ -371,9 +385,18 @@ impl MiningPoolCoordinator {
         };
 
         self.submitted_nonces.insert(nonce);
+        let worker_share_count = self
+            .worker_share_counts
+            .get_mut(&worker_id)
+            .ok_or_else(|| anyhow::anyhow!("worker share accounting entry is missing"))?;
+        *worker_share_count = worker_share_count
+            .checked_add(1)
+            .ok_or_else(|| anyhow::anyhow!("worker share count overflow"))?;
+
         Ok(PoolShareOutcome {
             block_candidate,
             accepted_share_count: self.submitted_nonces.len(),
+            worker_accepted_share_count: *worker_share_count,
         })
     }
 
@@ -387,6 +410,75 @@ impl MiningPoolCoordinator {
 
     pub fn accepted_share_count(&self) -> usize {
         self.submitted_nonces.len()
+    }
+
+    pub fn worker_accepted_share_count(&self, worker_id: &[u8; 32]) -> Option<u64> {
+        self.worker_share_counts.get(worker_id).copied()
+    }
+
+    /// Calculates a deterministic proportional allocation of integer reward
+    /// units. Largest remainders receive leftover units; ties use worker ID.
+    /// No funds are transferred and no blockchain reward is changed.
+    pub fn calculate_reward_allocations(
+        &self,
+        reward_units: u64,
+    ) -> Result<Vec<PoolRewardAllocation>> {
+        let total_shares: u128 = self
+            .worker_share_counts
+            .values()
+            .map(|count| u128::from(*count))
+            .sum();
+        ensure!(total_shares > 0, "cannot allocate reward without accepted shares");
+
+        let mut allocations = Vec::with_capacity(self.worker_share_counts.len());
+        let mut remainders = Vec::with_capacity(self.worker_share_counts.len());
+        let mut allocated_units = 0u64;
+
+        for (worker_id, shares) in &self.worker_share_counts {
+            if *shares == 0 {
+                continue;
+            }
+
+            let numerator = u128::from(reward_units) * u128::from(*shares);
+            let base_units = (numerator / total_shares) as u64;
+            let remainder = numerator % total_shares;
+            allocated_units = allocated_units
+                .checked_add(base_units)
+                .ok_or_else(|| anyhow::anyhow!("reward allocation overflow"))?;
+
+            allocations.push(PoolRewardAllocation {
+                worker_id: *worker_id,
+                accepted_shares: *shares,
+                reward_units: base_units,
+            });
+            remainders.push((*worker_id, remainder));
+        }
+
+        remainders.sort_by(|left, right| {
+            right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0))
+        });
+
+        let leftover_units = reward_units
+            .checked_sub(allocated_units)
+            .ok_or_else(|| anyhow::anyhow!("reward allocation exceeds reward amount"))?;
+        ensure!(
+            leftover_units as usize <= remainders.len(),
+            "reward allocation remainder is invalid"
+        );
+
+        for (worker_id, _) in remainders.iter().take(leftover_units as usize) {
+            let allocation = allocations
+                .iter_mut()
+                .find(|item| item.worker_id == *worker_id)
+                .ok_or_else(|| anyhow::anyhow!("worker allocation is missing"))?;
+            allocation.reward_units = allocation
+                .reward_units
+                .checked_add(1)
+                .ok_or_else(|| anyhow::anyhow!("worker reward allocation overflow"))?;
+        }
+
+        allocations.sort_by_key(|item| item.worker_id);
+        Ok(allocations)
     }
 }
 
@@ -480,3 +572,66 @@ mod tests {
         assert!(pool.submit_share([1u8; 32], job_id, 1, 150).is_err());
     }
 }
+    #[test]
+    fn tracks_accepted_shares_per_worker() {
+        let mut pool = MiningPoolCoordinator::new(3, 10).unwrap();
+        let job_id = pool.publish_job(sample_template(1), 0, 200).unwrap();
+        let worker_a = [1u8; 32];
+        let worker_b = [2u8; 32];
+        pool.register_worker(worker_a, 0, 2).unwrap();
+        pool.register_worker(worker_b, 1, 2).unwrap();
+
+        pool.submit_share(worker_a, job_id, 0, 150).unwrap();
+        pool.submit_share(worker_a, job_id, 2, 150).unwrap();
+        let result = pool.submit_share(worker_b, job_id, 1, 150).unwrap();
+
+        assert_eq!(result.worker_accepted_share_count, 1);
+        assert_eq!(pool.worker_accepted_share_count(&worker_a), Some(2));
+        assert_eq!(pool.worker_accepted_share_count(&worker_b), Some(1));
+    }
+
+    #[test]
+    fn reward_allocations_are_proportional_and_sum_exactly() {
+        let mut pool = MiningPoolCoordinator::new(3, 10).unwrap();
+        let job_id = pool.publish_job(sample_template(1), 0, 200).unwrap();
+        let worker_a = [1u8; 32];
+        let worker_b = [2u8; 32];
+        pool.register_worker(worker_a, 0, 2).unwrap();
+        pool.register_worker(worker_b, 1, 2).unwrap();
+
+        pool.submit_share(worker_a, job_id, 0, 150).unwrap();
+        pool.submit_share(worker_a, job_id, 2, 150).unwrap();
+        pool.submit_share(worker_b, job_id, 1, 150).unwrap();
+
+        let allocations = pool.calculate_reward_allocations(100).unwrap();
+        let total: u64 = allocations.iter().map(|item| item.reward_units).sum();
+
+        assert_eq!(total, 100);
+        assert_eq!(
+            allocations.iter().find(|item| item.worker_id == worker_a).unwrap().reward_units,
+            67
+        );
+        assert_eq!(
+            allocations.iter().find(|item| item.worker_id == worker_b).unwrap().reward_units,
+            33
+        );
+    }
+
+    #[test]
+    fn rejects_reward_allocation_without_shares() {
+        let pool = MiningPoolCoordinator::new(2, 10).unwrap();
+
+        assert!(pool.calculate_reward_allocations(100).is_err());
+    }
+
+    #[test]
+    fn new_job_resets_worker_share_accounting() {
+        let (mut pool, worker_id, job_id) = pool_with_job();
+        pool.submit_share(worker_id, job_id, 0, 150).unwrap();
+        assert_eq!(pool.worker_accepted_share_count(&worker_id), Some(1));
+
+        pool.publish_job(sample_template(1), 0, 300).unwrap();
+
+        assert_eq!(pool.worker_accepted_share_count(&worker_id), None);
+    }
+
