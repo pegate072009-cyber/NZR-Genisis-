@@ -1558,7 +1558,8 @@ mod tests {
 
     #[test]
     fn revokes_sessions_and_requires_auth_for_authenticated_registration() {
-        let (mut pool, _, _) = pool_with_job();
+        let mut pool = MiningPoolCoordinator::new(2, 10).unwrap();
+        pool.publish_job(sample_template(1), 0, 200).unwrap();
         let signing_key = ed25519_dalek::SigningKey::from_bytes(&[45u8; 32]);
         let worker_id = signing_key.verifying_key().to_bytes();
         let challenge = pool.issue_auth_challenge(worker_id, 100, 60).unwrap();
