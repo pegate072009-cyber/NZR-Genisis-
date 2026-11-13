@@ -355,7 +355,7 @@ mod tests {
             }
             other => panic!("unexpected authentication response: {other:?}"),
         };
-        let (_server, pool) = pool_thread.join().unwrap();
+        let (_server, mut pool) = pool_thread.join().unwrap();
         assert!(pool.authenticated_worker(&token, 102).is_ok());
     }
 
