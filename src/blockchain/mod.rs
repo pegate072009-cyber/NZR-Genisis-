@@ -5,6 +5,7 @@ pub mod mempool;
 pub mod merkle;
 pub mod mining;
 pub mod persistence;
+pub mod pool_network;
 pub mod state;
 pub mod transaction;
 pub mod validation;
