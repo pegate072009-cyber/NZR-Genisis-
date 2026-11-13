@@ -336,15 +336,16 @@ impl MiningPoolCoordinator {
         let mut worker_share_counts: Vec<PoolPersistedWorkerShareCount> = self
             .worker_share_counts
             .iter()
-            .map(|(worker_id, accepted_shares)| PoolPersistedWorkerShareCount {
-                worker_id: *worker_id,
-                accepted_shares: *accepted_shares,
-            })
+            .map(
+                |(worker_id, accepted_shares)| PoolPersistedWorkerShareCount {
+                    worker_id: *worker_id,
+                    accepted_shares: *accepted_shares,
+                },
+            )
             .collect();
         worker_share_counts.sort_by_key(|entry| entry.worker_id);
 
-        let mut submitted_nonces: Vec<u64> =
-            self.submitted_nonces.iter().copied().collect();
+        let mut submitted_nonces: Vec<u64> = self.submitted_nonces.iter().copied().collect();
         submitted_nonces.sort_unstable();
 
         let payload = PoolPersistencePayload {
@@ -387,10 +388,8 @@ impl MiningPoolCoordinator {
             .ok_or_else(|| anyhow::anyhow!("pool state path must include a file name"))?
             .to_string_lossy();
         let counter = POOL_STATE_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let temporary_path = path.with_file_name(format!(
-            "{file_name}.tmp-{}-{counter}",
-            std::process::id()
-        ));
+        let temporary_path =
+            path.with_file_name(format!("{file_name}.tmp-{}-{counter}", std::process::id()));
 
         let write_result = (|| -> Result<()> {
             let mut file = OpenOptions::new()
@@ -461,7 +460,10 @@ impl MiningPoolCoordinator {
     }
 
     fn restore_payload(payload: PoolPersistencePayload) -> Result<Self> {
-        ensure!(payload.max_workers > 0, "saved pool worker limit must be positive");
+        ensure!(
+            payload.max_workers > 0,
+            "saved pool worker limit must be positive"
+        );
         ensure!(
             payload.max_workers <= 10_000,
             "saved pool worker limit exceeds the safety limit"
