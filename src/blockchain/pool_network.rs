@@ -21,7 +21,9 @@ const AUTH_SESSION_TTL_SECONDS: u64 = 300;
 #[serde(tag = "type", deny_unknown_fields, rename_all = "snake_case")]
 pub enum PoolTcpRequest {
     Ping,
-    AuthChallenge { worker_id: [u8; 32] },
+    AuthChallenge {
+        worker_id: [u8; 32],
+    },
     AuthComplete {
         challenge_id: [u8; 32],
         signature: Vec<u8>,
@@ -32,7 +34,10 @@ pub enum PoolTcpRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", deny_unknown_fields, rename_all = "snake_case")]
 pub enum PoolTcpResponse {
-    Pong { protocol: String, version: u16 },
+    Pong {
+        protocol: String,
+        version: u16,
+    },
     Challenge {
         challenge_id: [u8; 32],
         worker_id: [u8; 32],
@@ -44,7 +49,9 @@ pub enum PoolTcpResponse {
         token: [u8; 32],
         expires_at: u64,
     },
-    Error { message: String },
+    Error {
+        message: String,
+    },
 }
 
 /// Sequential loopback-only listener. Authentication tokens are sent over this
