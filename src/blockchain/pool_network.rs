@@ -85,11 +85,7 @@ impl PoolTcpServer {
 
     /// Accepts one request and connects authentication requests to the pool
     /// coordinator. `now` is supplied by the caller as Unix seconds.
-    pub fn serve_one_with_pool(
-        &self,
-        pool: &mut MiningPoolCoordinator,
-        now: u64,
-    ) -> Result<()> {
+    pub fn serve_one_with_pool(&self, pool: &mut MiningPoolCoordinator, now: u64) -> Result<()> {
         self.serve_connection(Some(pool), now)
     }
 
@@ -180,7 +176,10 @@ fn handle_connection(
         ),
         PoolTcpRequest::AuthChallenge { worker_id } => {
             let Some(pool) = pool else {
-                send_error(stream, "authentication is unavailable on this listener".to_owned())?;
+                send_error(
+                    stream,
+                    "authentication is unavailable on this listener".to_owned(),
+                )?;
                 return Ok(());
             };
             match pool.issue_auth_challenge(worker_id, now, AUTH_CHALLENGE_TTL_SECONDS) {
@@ -193,11 +192,17 @@ fn handle_connection(
             signature,
         } => {
             let Some(pool) = pool else {
-                send_error(stream, "authentication is unavailable on this listener".to_owned())?;
+                send_error(
+                    stream,
+                    "authentication is unavailable on this listener".to_owned(),
+                )?;
                 return Ok(());
             };
             if signature.len() != 64 {
-                send_error(stream, "Ed25519 signature must contain exactly 64 bytes".to_owned())?;
+                send_error(
+                    stream,
+                    "Ed25519 signature must contain exactly 64 bytes".to_owned(),
+                )?;
                 return Ok(());
             }
             match pool.complete_authentication(
@@ -313,10 +318,8 @@ mod tests {
             (server, pool)
         });
 
-        let challenge_response = send_request(
-            address,
-            &PoolTcpRequest::AuthChallenge { worker_id },
-        );
+        let challenge_response =
+            send_request(address, &PoolTcpRequest::AuthChallenge { worker_id });
         let (challenge_id, nonce, expires_at) = match challenge_response {
             PoolTcpResponse::Challenge {
                 challenge_id,
