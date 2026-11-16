@@ -335,7 +335,10 @@ mod tests {
             nonce,
             expires_at,
         };
-        let signature = signing_key.sign(&challenge.signing_bytes()).to_bytes().to_vec();
+        let signature = signing_key
+            .sign(&challenge.signing_bytes())
+            .to_bytes()
+            .to_vec();
         let auth_response = send_request(
             address,
             &PoolTcpRequest::AuthComplete {
@@ -355,7 +358,7 @@ mod tests {
             }
             other => panic!("unexpected authentication response: {other:?}"),
         };
-        let (_server, pool) = pool_thread.join().unwrap();
+        let (_server, mut pool) = pool_thread.join().unwrap();
         assert!(pool.authenticated_worker(&token, 102).is_ok());
     }
 
