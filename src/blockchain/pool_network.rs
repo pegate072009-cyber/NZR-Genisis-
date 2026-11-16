@@ -28,6 +28,9 @@ pub enum PoolTcpRequest {
         challenge_id: [u8; 32],
         signature: Vec<u8>,
     },
+    GetJob {
+        token: [u8; 32],
+    },
 }
 
 /// Responses supported by the loopback-only pool transport.
@@ -48,6 +51,14 @@ pub enum PoolTcpResponse {
         worker_id: [u8; 32],
         token: [u8; 32],
         expires_at: u64,
+    },
+    Job {
+        job_id: [u8; 32],
+        template: super::block::Block,
+        share_difficulty_bits: u16,
+        expires_at: u64,
+        nonce_start: u64,
+        nonce_stride: u64,
     },
     Error {
         message: String,
@@ -229,6 +240,53 @@ fn handle_connection(
                 Err(error) => send_error(stream, error.to_string()),
             }
         }
+        PoolTcpRequest::GetJob { token } => {
+            let Some(pool) = pool else {
+                send_error(
+                    stream,
+                    "job distribution is unavailable on this listener".to_owned(),
+                )?;
+                return Ok(());
+            };
+
+            let worker_id = match pool.authenticated_worker(&token, now) {
+                Ok(worker_id) => worker_id,
+                Err(error) => {
+                    send_error(stream, error.to_string())?;
+                    return Ok(());
+                }
+            };
+            let assignment = match pool.worker_assignment(&worker_id) {
+                Some(assignment) => assignment,
+                None => {
+                    send_error(stream, "worker is not registered".to_owned())?;
+                    return Ok(());
+                }
+            };
+            let job = match pool.active_job() {
+                Some(job) if now < job.expires_at => job.clone(),
+                Some(_) => {
+                    send_error(stream, "active pool job has expired".to_owned())?;
+                    return Ok(());
+                }
+                None => {
+                    send_error(stream, "no active pool job".to_owned())?;
+                    return Ok(());
+                }
+            };
+
+            write_response(
+                stream,
+                &PoolTcpResponse::Job {
+                    job_id: job.job_id,
+                    template: job.template,
+                    share_difficulty_bits: job.share_difficulty_bits,
+                    expires_at: job.expires_at,
+                    nonce_start: assignment.nonce_start,
+                    nonce_stride: assignment.nonce_stride,
+                },
+            )
+        }
     }
 }
 
@@ -370,6 +428,86 @@ mod tests {
         };
         let (_server, mut pool) = pool_thread.join().unwrap();
         assert!(pool.authenticated_worker(&token, 102).is_ok());
+    }
+
+
+    #[test]
+    fn distributes_job_only_to_authenticated_registered_worker() {
+        let server = PoolTcpServer::bind_loopback(0).unwrap();
+        let address = server.local_addr().unwrap();
+        let signing_key = SigningKey::from_bytes(&[78u8; 32]);
+        let worker_id = signing_key.verifying_key().to_bytes();
+        let (token_tx, token_rx) = std::sync::mpsc::channel();
+
+        let pool_thread = thread::spawn(move || {
+            let mut pool = MiningPoolCoordinator::new(4, 10).unwrap();
+            let template = super::super::block::Block {
+                version: 1,
+                height: 1,
+                previous_hash: [1u8; 32],
+                timestamp: 100,
+                reward_coin_number: 1,
+                reward_coin_id: [2u8; 32],
+                miner_address: [3u8; 32],
+                transactions: Vec::new(),
+                transaction_root: [0u8; 32],
+                nonce: 0,
+                difficulty_bits: 8,
+            };
+            pool.publish_job(template.clone(), 4, 500).unwrap();
+
+            let challenge = pool
+                .issue_auth_challenge(worker_id, 100, AUTH_CHALLENGE_TTL_SECONDS)
+                .unwrap();
+            let signature = signing_key.sign(&challenge.signing_bytes()).to_bytes();
+            let session = pool
+                .complete_authentication(
+                    challenge.challenge_id,
+                    &signature,
+                    100,
+                    AUTH_SESSION_TTL_SECONDS,
+                )
+                .unwrap();
+            pool.register_authenticated_worker(&session.token, 101, 7, 3)
+                .unwrap();
+            token_tx.send(session.token).unwrap();
+            server.serve_one_with_pool(&mut pool, 101).unwrap();
+        });
+
+        let token = token_rx.recv().unwrap();
+        let response = send_request(address, &PoolTcpRequest::GetJob { token });
+        pool_thread.join().unwrap();
+
+        match response {
+            PoolTcpResponse::Job {
+                template: returned_template,
+                share_difficulty_bits,
+                expires_at,
+                nonce_start,
+                nonce_stride,
+                ..
+            } => {
+                assert_eq!(returned_template.height, 1);
+                assert_eq!(share_difficulty_bits, 4);
+                assert_eq!(expires_at, 500);
+                assert_eq!(nonce_start, 7);
+                assert_eq!(nonce_stride, 3);
+            }
+            other => panic!("unexpected job response: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_job_request_without_pool_coordinator() {
+        let server = PoolTcpServer::bind_loopback(0).unwrap();
+        let address = server.local_addr().unwrap();
+        let worker = thread::spawn(move || server.serve_one().unwrap());
+        let response = send_request(
+            address,
+            &PoolTcpRequest::GetJob { token: [0u8; 32] },
+        );
+        worker.join().unwrap();
+        assert!(matches!(response, PoolTcpResponse::Error { .. }));
     }
 
     #[test]

@@ -1013,6 +1013,11 @@ impl MiningPoolCoordinator {
         self.job.as_ref()
     }
 
+    /// Returns the nonce assignment for a registered worker.
+    pub fn worker_assignment(&self, worker_id: &[u8; 32]) -> Option<PoolWorkerAssignment> {
+        self.workers.get(worker_id).copied()
+    }
+
     pub fn worker_count(&self) -> usize {
         self.workers.len()
     }
