@@ -6,7 +6,7 @@ use nezora_supply::blockchain::pool_network::{PoolTcpRequest, PoolTcpResponse};
 
 #[test]
 fn ping_request_round_trips_as_expected_json() {
-    let request = PoolTcpRequest::Ping;
+    let request = PoolTcpRequest::Ping {};
     let encoded = serde_json::to_string(&request).expect("serialize Ping");
     assert_eq!(encoded, r#"{"type":"ping"}"#);
     let decoded: PoolTcpRequest = serde_json::from_str(&encoded).expect("deserialize Ping");
