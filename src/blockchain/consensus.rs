@@ -262,4 +262,58 @@ mod tests {
 
         assert!(expected_difficulty_bits(&chain, 9, &ConsensusParams::default()).is_err());
     }
+
+    // Regression test: retargeting must not happen with insufficient history.
+    #[test]
+    fn does_not_retarget_when_history_is_shorter_than_interval() {
+        let params = ConsensusParams {
+            retarget_interval: 3,
+            target_block_time_secs: 10,
+            initial_difficulty_bits: 12,
+            max_difficulty_bits: 20,
+            ..ConsensusParams::default()
+        };
+        let chain = Chain {
+            blocks: vec![test_block(1, 16), test_block(2, 16)],
+            state: LedgerState::default(),
+        };
+
+        assert_eq!(expected_difficulty_bits(&chain, 3, &params).unwrap(), 16);
+    }
+
+    // Regression test: fast retargeting is clamped to the configured maximum.
+    #[test]
+    fn retarget_difficulty_never_exceeds_maximum() {
+        let params = ConsensusParams {
+            retarget_interval: 2,
+            target_block_time_secs: 10,
+            initial_difficulty_bits: 12,
+            max_difficulty_bits: 13,
+            ..ConsensusParams::default()
+        };
+        let chain = Chain {
+            blocks: vec![test_block(1, 13), test_block(2, 13)],
+            state: LedgerState::default(),
+        };
+
+        assert_eq!(expected_difficulty_bits(&chain, 3, &params).unwrap(), 13);
+    }
+
+    // Regression test: slow retargeting clamps at the baseline difficulty.
+    #[test]
+    fn retarget_difficulty_never_below_initial_baseline() {
+        let params = ConsensusParams {
+            retarget_interval: 2,
+            target_block_time_secs: 10,
+            initial_difficulty_bits: 12,
+            max_difficulty_bits: 20,
+            ..ConsensusParams::default()
+        };
+        let chain = Chain {
+            blocks: vec![test_block(1, 13), test_block(1_000, 13)],
+            state: LedgerState::default(),
+        };
+
+        assert_eq!(expected_difficulty_bits(&chain, 3, &params).unwrap(), 12);
+    }
 }
