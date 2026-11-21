@@ -20,7 +20,7 @@ const AUTH_SESSION_TTL_SECONDS: u64 = 300;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", deny_unknown_fields, rename_all = "snake_case")]
 pub enum PoolTcpRequest {
-    Ping,
+    Ping {},
     AuthChallenge {
         worker_id: [u8; 32],
     },
@@ -185,7 +185,7 @@ fn handle_connection(
     };
 
     match request {
-        PoolTcpRequest::Ping => write_response(
+        PoolTcpRequest::Ping {} => write_response(
             stream,
             &PoolTcpResponse::Pong {
                 protocol: POOL_TCP_PROTOCOL_NAME.to_owned(),
@@ -330,7 +330,7 @@ mod tests {
         let server = PoolTcpServer::bind_loopback(0).unwrap();
         let address = server.local_addr().unwrap();
         let worker = thread::spawn(move || server.serve_one().unwrap());
-        let response = send_request(address, &PoolTcpRequest::Ping);
+        let response = send_request(address, &PoolTcpRequest::Ping {});
         worker.join().unwrap();
         assert_eq!(
             response,
