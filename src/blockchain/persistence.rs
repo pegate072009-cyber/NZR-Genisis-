@@ -12,14 +12,12 @@ const MAX_CHAIN_FILE_BYTES: u64 = 512 * 1024 * 1024;
 const CHAIN_FORMAT_VERSION: u32 = 2;
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ChainFile {
     format_version: u32,
     blocks: Vec<Block>,
 }
-
 
 fn validate_block_count(block_count: usize, max_supply: u64) -> Result<()> {
     let block_count =
@@ -31,7 +29,6 @@ fn validate_block_count(block_count: usize, max_supply: u64) -> Result<()> {
     Ok(())
 }
 
-
 fn temporary_path(path: &Path, attempt: u64) -> Result<PathBuf> {
     let name = path
         .file_name()
@@ -41,19 +38,16 @@ fn temporary_path(path: &Path, attempt: u64) -> Result<PathBuf> {
     Ok(path.with_file_name(temp_name))
 }
 
-
 /// Save validated block history. Ledger state is reconstructed by replay on load.
 /// A unique temporary file prevents collisions between concurrent save attempts.
 pub fn save_chain(path: &Path, chain: &Chain, params: &ConsensusParams) -> Result<()> {
     chain.verify_integrity(params)?;
-
 
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
     fs::create_dir_all(parent)?;
-
 
     if let Ok(metadata) = fs::symlink_metadata(path) {
         ensure!(
@@ -63,7 +57,6 @@ pub fn save_chain(path: &Path, chain: &Chain, params: &ConsensusParams) -> Resul
         ensure!(metadata.is_file(), "chain path is not a regular file");
     }
 
-
     let data = serde_json::to_vec(&ChainFile {
         format_version: CHAIN_FORMAT_VERSION,
         blocks: chain.blocks.clone(),
@@ -72,7 +65,6 @@ pub fn save_chain(path: &Path, chain: &Chain, params: &ConsensusParams) -> Resul
         u64::try_from(data.len()).unwrap_or(u64::MAX) <= MAX_CHAIN_FILE_BYTES,
         "chain file exceeds size limit"
     );
-
 
     let mut temp_path = None;
     let mut temp_file = None;
@@ -98,7 +90,6 @@ pub fn save_chain(path: &Path, chain: &Chain, params: &ConsensusParams) -> Resul
     let temp_path = temp_path.context("could not create a unique temporary chain file")?;
     let mut temp_file = temp_file.context("temporary chain file was not created")?;
 
-
     let result = (|| -> Result<()> {
         temp_file
             .write_all(&data)
@@ -118,15 +109,12 @@ pub fn save_chain(path: &Path, chain: &Chain, params: &ConsensusParams) -> Resul
         Ok(())
     })();
 
-
     if result.is_err() {
         let _ = fs::remove_file(&temp_path);
     }
 
-
     result
 }
-
 
 /// Load a bounded chain file and replay every block before returning it.
 pub fn load_chain(path: &Path, params: &ConsensusParams) -> Result<Chain> {
@@ -168,7 +156,6 @@ pub fn load_chain(path: &Path, params: &ConsensusParams) -> Result<Chain> {
     chain.verify_integrity(params)?;
     Ok(chain)
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -216,7 +203,6 @@ mod tests {
         chain
     }
 
-
     #[test]
     fn round_trips_valid_chain_and_reconstructs_ledger() {
         let dir = tempdir().unwrap();
@@ -238,7 +224,6 @@ mod tests {
         assert!(loaded.verify_integrity(&params).is_ok());
     }
 
-
     #[test]
     fn refuses_to_save_corrupted_ledger_state() {
         let dir = tempdir().unwrap();
@@ -251,13 +236,11 @@ mod tests {
         assert!(!path.exists());
     }
 
-
     #[test]
     fn rejects_block_history_longer_than_maximum_supply() {
         assert!(validate_block_count(30_000_001, 30_000_000).is_err());
         assert!(validate_block_count(30_000_000, 30_000_000).is_ok());
     }
-
 
     #[test]
     fn rejects_missing_chain_file() {
@@ -268,7 +251,6 @@ mod tests {
         )
         .is_err());
     }
-
 
     #[test]
     fn rejects_unknown_chain_file_fields() {
@@ -283,7 +265,6 @@ mod tests {
         assert!(load_chain(&path, &ConsensusParams::default()).is_err());
     }
 
-
     #[test]
     fn rejects_unsupported_chain_file_version() {
         let dir = tempdir().unwrap();
@@ -293,7 +274,6 @@ mod tests {
         assert!(load_chain(&path, &ConsensusParams::default()).is_err());
     }
 
-
     #[test]
     fn rejects_corrupt_json() {
         let dir = tempdir().unwrap();
@@ -302,22 +282,6 @@ mod tests {
 
         assert!(load_chain(&path, &ConsensusParams::default()).is_err());
     }
-
-
-    #[test]
-    fn rejects_truncated_chain_file() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("chain.json");
-
-        fs::write(
-            &path,
-            br#"{"format_version":2,"blocks":[{"version":2,"height":1"#,
-        )
-        .unwrap();
-
-        assert!(load_chain(&path, &ConsensusParams::default()).is_err());
-    }
-
 
     #[test]
     fn rejects_oversized_chain_file() {
@@ -334,7 +298,6 @@ mod tests {
         assert!(load_chain(&path, &ConsensusParams::default()).is_err());
     }
 
-
     #[test]
     fn failed_save_preserves_existing_valid_chain_file() {
         let dir = tempdir().unwrap();
@@ -348,18 +311,17 @@ mod tests {
         let mut corrupted_chain = valid_chain.clone();
         corrupted_chain.state.balances.insert([99u8; 32], 1);
 
-        assert!(save_chain(&path, corrupted_chain, &params).is_err());
+        // FIX: save_chain requires &Chain; borrow corrupted_chain.
+        assert!(save_chain(&path, &corrupted_chain, &params).is_err());
         assert_eq!(fs::read(&path).unwrap(), original_bytes);
         assert!(load_chain(&path, &params).is_ok());
     }
-
 
     #[test]
     fn rejects_directory_as_chain_file() {
         let dir = tempdir().unwrap();
         assert!(load_chain(dir.path(), &ConsensusParams::default()).is_err());
     }
-
 
     #[cfg(unix)]
     #[test]
@@ -373,5 +335,19 @@ mod tests {
         symlink(&target, &link).unwrap();
 
         assert!(load_chain(&link, &ConsensusParams::default()).is_err());
+    }
+
+    #[test]
+    fn rejects_truncated_chain_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("chain.json");
+
+        fs::write(
+            &path,
+            br#"{"format_version":2,"blocks":[{"version":2,"height":1"#,
+        )
+        .unwrap();
+
+        assert!(load_chain(&path, &ConsensusParams::default()).is_err());
     }
 }
