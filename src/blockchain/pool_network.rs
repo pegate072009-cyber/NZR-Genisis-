@@ -430,7 +430,6 @@ mod tests {
         assert!(pool.authenticated_worker(&token, 102).is_ok());
     }
 
-
     #[test]
     fn distributes_job_only_to_authenticated_registered_worker() {
         let server = PoolTcpServer::bind_loopback(0).unwrap();
@@ -502,10 +501,7 @@ mod tests {
         let server = PoolTcpServer::bind_loopback(0).unwrap();
         let address = server.local_addr().unwrap();
         let worker = thread::spawn(move || server.serve_one().unwrap());
-        let response = send_request(
-            address,
-            &PoolTcpRequest::GetJob { token: [0u8; 32] },
-        );
+        let response = send_request(address, &PoolTcpRequest::GetJob { token: [0u8; 32] });
         worker.join().unwrap();
         assert!(matches!(response, PoolTcpResponse::Error { .. }));
     }
