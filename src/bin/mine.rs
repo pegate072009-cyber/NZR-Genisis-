@@ -1,104 +1,97 @@
 use anyhow::{ensure, Context, Result};
 use clap::Parser;
-use nezora_supply::{
-    blockchain::{
-        mining::mine_block,
-        persistence::{load_chain, save_chain},
-        Chain, ConsensusParams,
-    },
-    wallet::Wallet,
+use nezora_supply::blockchain::{
+    mining::mine_block_parallel,
+    persistence::{load_chain, save_chain},
+    Chain, ConsensusParams,
 };
 use std::{
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
 
+/// Nezora solo CPU miner for local development/testnet.
 #[derive(Debug, Parser)]
-#[command(name = "nezora-mine", about = "Mine one Nezora local-testnet block")]
+#[command(name = "nezora-mine", version, about)]
 struct Args {
-    /// Existing Nezora wallet private-key file (32 raw bytes).
-    #[arg(long, default_value = "private/miner.key")]
-    wallet_key: PathBuf,
-
-    /// Local chain JSON file.
+    /// Miner address: exactly 64 hexadecimal characters (32 bytes).
+    #[arg(long)]
+    miner_address: String,
+    /// Local chain snapshot. Created if it does not exist.
     #[arg(long, default_value = "data/chain.json")]
     chain: PathBuf,
-
-    /// Maximum nonce attempts for this mining run.
-    #[arg(long, default_value_t = 2_000_000)]
-    max_attempts: u64,
+    /// Number of CPU workers (1..=256).
+    #[arg(long, default_value_t = 4)]
+    workers: usize,
+    /// Total nonce attempts shared by all workers.
+    #[arg(long, default_value_t = 10_000_000)]
+    max_nonce_attempts: u64,
 }
 
-fn now_unix_seconds() -> Result<u64> {
-    Ok(SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .context("system clock is before Unix epoch")?
-        .as_secs())
-}
-
-fn run() -> Result<()> {
+fn main() -> Result<()> {
     let args = Args::parse();
-    ensure!(args.max_attempts > 0, "max attempts must be positive");
 
-    let wallet = Wallet::load_private_key(&args.wallet_key)?;
-    let miner_address_vec = hex::decode(wallet.public_key_hex())?;
     ensure!(
-        miner_address_vec.len() == 32,
-        "wallet public key has invalid length"
+        args.miner_address.len() == 64
+            && args.miner_address.bytes().all(|byte| byte.is_ascii_hexdigit()),
+        "--miner-address must be exactly 64 hexadecimal characters"
     );
-    let mut miner_address = [0u8; 32];
-    miner_address.copy_from_slice(&miner_address_vec);
+    let decoded = hex::decode(&args.miner_address).context("decoding miner address")?;
+    let miner_address: [u8; 32] = decoded
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("miner address must decode to exactly 32 bytes"))?;
+
+    ensure!(
+        args.workers > 0 && args.workers <= 256,
+        "--workers must be between 1 and 256"
+    );
+    ensure!(
+        args.max_nonce_attempts >= args.workers as u64,
+        "--max-nonce-attempts must be at least the worker count"
+    );
 
     let params = ConsensusParams::default();
-    params.validate()?;
-
     let mut chain = if args.chain.exists() {
-        load_chain(&args.chain, &params)?
+        load_chain(&args.chain, &params)
+            .with_context(|| format!("loading chain {}", args.chain.display()))?
     } else {
         Chain::default()
     };
 
-    let next_coin_number = chain
-        .state
-        .issued_coin_count
-        .checked_add(1)
-        .context("coin number overflow")?;
-    ensure!(
-        next_coin_number <= params.max_supply,
-        "maximum Nezora supply has already been issued"
-    );
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .context("system clock is before Unix epoch")?
+        .as_secs();
 
-    let timestamp = now_unix_seconds()?;
-    let block = mine_block(
+    println!("Nezora solo CPU miner (local development/testnet)");
+    println!("Current height: {}", chain.height());
+    println!("Candidate height: {}", chain.height() + 1);
+    println!("Workers: {}", args.workers);
+    println!("Searching for proof of work...");
+
+    let block = mine_block_parallel(
         &chain,
         miner_address,
         Vec::new(),
-        timestamp,
-        timestamp,
-        args.max_attempts,
+        now,
+        now,
+        args.max_nonce_attempts,
+        args.workers,
         &params,
-    )?;
+    )
+    .context("mining failed; no block was added")?;
 
     let block_hash = hex::encode(block.hash());
-    let nonce = block.nonce;
-    let height = block.height;
-    chain.accept_block(block, &params, timestamp)?;
-    save_chain(&args.chain, &chain, &params)?;
+    chain
+        .accept_block(block, &params, now)
+        .context("locally mined block failed chain validation")?;
+    save_chain(&args.chain, &chain, &params)
+        .with_context(|| format!("saving chain {}", args.chain.display()))?;
 
-    println!("NEZORA LOCAL TESTNET BLOCK MINED");
-    println!("height={height}");
-    println!("hash={block_hash}");
-    println!("nonce={nonce}");
-    println!("reward=1 NZR");
-    println!("issued_coins={}", chain.state.issued_coin_count);
-    println!("miner={}", hex::encode(miner_address));
-    println!("chain_file={}", args.chain.display());
+    println!("BLOCK ACCEPTED AND SAVED");
+    println!("Height: {}", chain.height());
+    println!("Hash: {block_hash}");
+    println!("Chain file: {}", args.chain.display());
+    println!("Reward: 1 NZR (testnet/development accounting only)");
     Ok(())
-}
-
-fn main() {
-    if let Err(error) = run() {
-        eprintln!("Mining failed: {error:#}");
-        std::process::exit(1);
-    }
 }
