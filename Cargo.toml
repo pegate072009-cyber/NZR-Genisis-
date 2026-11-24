@@ -8,6 +8,7 @@ license = "MIT"
 [dependencies]
 aes-gcm = "0.10"
 anyhow = "1"
+argon2 = "0.5"
 clap = { version = "4", features = ["derive"] }
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 hex = "0.4"
