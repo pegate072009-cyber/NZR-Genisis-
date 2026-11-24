@@ -1,8 +1,5 @@
 use nezora_supply::{
-    blockchain::{
-        mining::mine_block_parallel,
-        Chain, ConsensusParams,
-    },
+    blockchain::{mining::mine_block_parallel, Chain, ConsensusParams},
     wallet::Wallet,
 };
 
@@ -64,13 +61,7 @@ fn signed_wallet_transfer_updates_balances_and_nonce_after_block_acceptance() {
         .expect("signed transaction should verify");
 
     // The second block includes the transfer and gives its miner one reward.
-    mine_and_accept(
-        &mut chain,
-        miner_two,
-        vec![transfer],
-        NOW + 600,
-        &params,
-    );
+    mine_and_accept(&mut chain, miner_two, vec![transfer], NOW + 600, &params);
 
     assert_eq!(chain.height(), 2);
     assert_eq!(chain.state.balances.get(&sender_address), Some(&0));
