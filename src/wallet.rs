@@ -131,15 +131,20 @@ mod tests {
     fn wallet_signs_active_chain_transaction_format() {
         let sender = Wallet::from_seed([0x51u8; 32]);
         let recipient = Wallet::from_seed([0x52u8; 32]);
-        let recipient_bytes: [u8; 32] =
-            hex::decode(recipient.public_key_hex()).unwrap().try_into().unwrap();
+        let recipient_bytes: [u8; 32] = hex::decode(recipient.public_key_hex())
+            .unwrap()
+            .try_into()
+            .unwrap();
 
         let tx = sender
             .sign_chain_transaction(2, 0, recipient_bytes, 3)
             .unwrap();
 
         tx.verify_protocol_version(2).unwrap();
-        assert_eq!(tx.sender, hex::decode(sender.public_key_hex()).unwrap().as_slice());
+        assert_eq!(
+            tx.sender,
+            hex::decode(sender.public_key_hex()).unwrap().as_slice()
+        );
         assert_eq!(tx.outputs[0].recipient, recipient_bytes);
         assert_eq!(tx.outputs[0].amount, 3);
     }
