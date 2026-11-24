@@ -2,10 +2,7 @@ use anyhow::{ensure, Context, Result};
 use clap::{Parser, Subcommand};
 use ed25519_dalek::VerifyingKey;
 use nezora_supply::{
-    blockchain::{
-        persistence::load_chain,
-        ConsensusParams,
-    },
+    blockchain::{persistence::load_chain, ConsensusParams},
     wallet::Wallet,
 };
 use std::{
@@ -120,7 +117,12 @@ fn main() -> Result<()> {
                 .write(true)
                 .create_new(true)
                 .open(&output)
-                .with_context(|| format!("creating transaction file without overwriting: {}", output.display()))?;
+                .with_context(|| {
+                    format!(
+                        "creating transaction file without overwriting: {}",
+                        output.display()
+                    )
+                })?;
             file.write_all(&json)?;
             file.sync_all()?;
 
