@@ -108,10 +108,7 @@ fn main() -> Result<()> {
                 fs::create_dir_all(parent)?;
             }
             wallet.save_private_key(&output).with_context(|| {
-                format!(
-                    "creating backup without overwriting: {}",
-                    output.display()
-                )
+                format!("creating backup without overwriting: {}", output.display())
             })?;
             println!("Wallet backup created.");
             println!("Public key: {}", wallet.public_key_hex());
