@@ -5,7 +5,7 @@ use nezora_supply::{
     blockchain::{persistence::load_chain, ConsensusParams, Transaction},
     wallet::Wallet,
 };
-use std::{fs::OpenOptions, io::Write, path::PathBuf};
+use std::{fs, fs::OpenOptions, io::Write, path::PathBuf};
 
 #[derive(Debug, Parser)]
 #[command(name = "wallet", version, about = "Nezora (NZR) local wallet utility")]
@@ -25,6 +25,20 @@ enum Command {
     Info {
         #[arg(long, default_value = "data/wallet.key")]
         key: PathBuf,
+    },
+    /// Copy a wallet key into a new, permission-restricted backup file.
+    Backup {
+        #[arg(long, default_value = "data/wallet.key")]
+        key: PathBuf,
+        #[arg(long, default_value = "backup/wallet.key")]
+        output: PathBuf,
+    },
+    /// Restore a wallet from a backup into a new key file without overwriting.
+    Restore {
+        #[arg(long, default_value = "backup/wallet.key")]
+        backup: PathBuf,
+        #[arg(long, default_value = "data/restored-wallet.key")]
+        output: PathBuf,
     },
     /// Show confirmed balance and next transaction nonce.
     Balance {
@@ -87,6 +101,46 @@ fn main() -> Result<()> {
                 .with_context(|| format!("loading wallet key from {}", key.display()))?;
             println!("Nezora wallet public key: {}", wallet.public_key_hex());
         }
+        Command::Backup { key, output } => {
+            let wallet = Wallet::load_private_key(&key)
+                .with_context(|| format!("loading wallet key from {}", key.display()))?;
+            if let Some(parent) = output.parent().filter(|p| !p.as_os_str().is_empty()) {
+                fs::create_dir_all(parent)?;
+            }
+            wallet.save_private_key(&output).with_context(|| {
+                format!(
+                    "creating backup without overwriting: {}",
+                    output.display()
+                )
+            })?;
+            println!("Wallet backup created.");
+            println!("Public key: {}", wallet.public_key_hex());
+            println!("Backup file: {}", output.display());
+            println!("Keep this file offline and private. Never commit it to Git.");
+        }
+        Command::Restore { backup, output } => {
+            let wallet = Wallet::load_private_key(&backup)
+                .with_context(|| format!("loading backup from {}", backup.display()))?;
+            if let Some(parent) = output.parent().filter(|p| !p.as_os_str().is_empty()) {
+                fs::create_dir_all(parent)?;
+            }
+            wallet.save_private_key(&output).with_context(|| {
+                format!(
+                    "creating restored key without overwriting: {}",
+                    output.display()
+                )
+            })?;
+            let restored = Wallet::load_private_key(&output)
+                .with_context(|| format!("verifying restored key at {}", output.display()))?;
+            ensure!(
+                restored.public_key_hex() == wallet.public_key_hex(),
+                "restored wallet public key does not match backup"
+            );
+            println!("Wallet restored and verified.");
+            println!("Public key: {}", restored.public_key_hex());
+            println!("Restored key file: {}", output.display());
+            println!("The backup file was not modified.");
+        }
         Command::Balance { key, chain } => {
             let params = ConsensusParams::default();
             let ledger = load_chain(&chain, &params)
@@ -146,7 +200,7 @@ fn main() -> Result<()> {
             let tx_id = hex::encode(tx.id());
             let json = serde_json::to_vec_pretty(&tx)?;
             if let Some(parent) = output.parent().filter(|p| !p.as_os_str().is_empty()) {
-                std::fs::create_dir_all(parent)?;
+                fs::create_dir_all(parent)?;
             }
             let mut file = OpenOptions::new()
                 .write(true)
