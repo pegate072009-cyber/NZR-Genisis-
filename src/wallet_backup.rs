@@ -34,31 +34,19 @@ pub fn create_encrypted_backup(
     OsRng.fill_bytes(&mut nonce);
 
     let mut derived_key = [0u8; KEY_LEN];
-    let argon = Argon2::new(
-        Algorithm::Argon2id,
-        Version::V0x13,
-        Params::default(),
-    );
+    let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, Params::default());
     let derive_result = argon.hash_password_into(password, &salt, &mut derived_key);
     if let Err(error) = derive_result {
         seed.fill(0);
         derived_key.fill(0);
-        return Err(anyhow::anyhow!(
-            "deriving encrypted-backup key: {error:?}"
-        ));
+        return Err(anyhow::anyhow!("deriving encrypted-backup key: {error:?}"));
     }
 
     let cipher = Aes256Gcm::new_from_slice(&derived_key)
         .map_err(|_| anyhow::anyhow!("invalid derived AES key"))?;
     let aad = MAGIC.as_slice();
     let encrypted = cipher
-        .encrypt(
-            Nonce::from_slice(&nonce),
-            Payload {
-                msg: &seed,
-                aad,
-            },
-        )
+        .encrypt(Nonce::from_slice(&nonce), Payload { msg: &seed, aad })
         .map_err(|_| anyhow::anyhow!("encrypting wallet backup"))?;
 
     seed.fill(0);
