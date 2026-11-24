@@ -2,7 +2,7 @@ use anyhow::{ensure, Context, Result};
 use clap::{Parser, Subcommand};
 use ed25519_dalek::VerifyingKey;
 use nezora_supply::{
-    blockchain::{persistence::load_chain, ConsensusParams},
+    blockchain::{persistence::load_chain, ConsensusParams, Transaction},
     wallet::Wallet,
 };
 use std::{fs::OpenOptions, io::Write, path::PathBuf};
@@ -41,6 +41,23 @@ enum Command {
         /// Output file. Existing files are never overwritten.
         #[arg(long, default_value = "data/pending/transaction.json")]
         output: PathBuf,
+    },
+    /// Show confirmed incoming and outgoing transactions for this wallet.
+    History {
+        #[arg(long, default_value = "data/wallet.key")]
+        key: PathBuf,
+        #[arg(long, default_value = "data/chain.json")]
+        chain: PathBuf,
+        /// Maximum number of matching transactions to display.
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
+    },
+    /// Find a confirmed transaction by its 64-character hexadecimal ID.
+    Transaction {
+        #[arg(long, default_value = "data/chain.json")]
+        chain: PathBuf,
+        #[arg(long)]
+        id: String,
     },
 }
 
@@ -127,7 +144,104 @@ fn main() -> Result<()> {
             println!("File: {}", output.display());
             println!("This does not transfer funds until a valid block includes the transaction.");
         }
+        Command::History { key, chain, limit } => {
+            ensure!(limit > 0 && limit <= 10_000, "--limit must be between 1 and 10000");
+            let params = ConsensusParams::default();
+            let ledger = load_chain(&chain, &params)
+                .with_context(|| format!("loading chain {}", chain.display()))?;
+            let wallet = Wallet::load_private_key(&key)
+                .with_context(|| format!("loading wallet key {}", key.display()))?;
+            let address: [u8; 32] = hex::decode(wallet.public_key_hex())?
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("wallet public key must be 32 bytes"))?;
+
+            let mut entries = Vec::new();
+            for block in &ledger.blocks {
+                for tx in &block.transactions {
+                    if tx.sender == address
+                        || tx.outputs.iter().any(|output| output.recipient == address)
+                    {
+                        entries.push((block.height, tx.clone()));
+                    }
+                }
+            }
+
+            let start = entries.len().saturating_sub(limit);
+            let selected = &entries[start..];
+            if selected.is_empty() {
+                println!("No confirmed transactions found for this wallet.");
+            } else {
+                println!("Confirmed transaction history (oldest to newest):");
+                for (height, tx) in selected {
+                    print_transaction(tx, *height, address);
+                }
+                println!("Displayed {} transaction(s).", selected.len());
+            }
+        }
+        Command::Transaction { chain, id } => {
+            ensure!(
+                id.len() == 64 && id.bytes().all(|byte| byte.is_ascii_hexdigit()),
+                "--id must be exactly 64 hexadecimal characters"
+            );
+            let wanted = hex::decode(&id).context("decoding transaction ID")?;
+            let wanted: [u8; 32] = wanted
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("transaction ID must be 32 bytes"))?;
+            let params = ConsensusParams::default();
+            let ledger = load_chain(&chain, &params)
+                .with_context(|| format!("loading chain {}", chain.display()))?;
+
+            let mut found = None;
+            for block in &ledger.blocks {
+                for tx in &block.transactions {
+                    if tx.id() == wanted {
+                        found = Some((block.height, tx));
+                        break;
+                    }
+                }
+                if found.is_some() {
+                    break;
+                }
+            }
+
+            match found {
+                Some((height, tx)) => {
+                    println!("Transaction status: CONFIRMED");
+                    print_transaction(tx, height, [0u8; 32]);
+                }
+                None => anyhow::bail!("confirmed transaction not found"),
+            }
+        }
     }
 
     Ok(())
+}
+
+fn print_transaction(tx: &Transaction, height: u64, wallet_address: [u8; 32]) {
+    let id = hex::encode(tx.id());
+    let sender = hex::encode(tx.sender);
+    println!("----------------------------------------");
+    println!("Transaction ID: {id}");
+    println!("Block height: {height}");
+    println!(
+        "Direction: {}",
+        if tx.sender == wallet_address {
+            "OUTGOING"
+        } else if tx.outputs.iter().any(|output| output.recipient == wallet_address) {
+            "INCOMING"
+        } else {
+            "CHAIN RECORD"
+        }
+    );
+    println!("Sender: {sender}");
+    println!("Nonce: {}", tx.nonce);
+    for (index, output) in tx.outputs.iter().enumerate() {
+        println!(
+            "Output {}: {} NZR units to {}",
+            index + 1,
+            output.amount,
+            hex::encode(output.recipient)
+        );
+    }
+    println!("Status: CONFIRMED");
 }
