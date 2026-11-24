@@ -39,6 +39,22 @@ impl Wallet {
         Transaction::sign(&self.signing_key, recipient, nonce, amount)
     }
 
+    /// Sign a transaction using the active blockchain transaction format.
+    pub fn sign_chain_transaction(
+        &self,
+        version: u32,
+        nonce: u64,
+        recipient: [u8; 32],
+        amount: u64,
+    ) -> Result<crate::blockchain::transaction::Transaction> {
+        crate::blockchain::transaction::Transaction::sign(
+            version,
+            nonce,
+            vec![crate::blockchain::transaction::TxOutput { recipient, amount }],
+            &self.signing_key,
+        )
+    }
+
     pub fn save_private_key(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
@@ -109,5 +125,22 @@ mod tests {
         fs::write(&path, [0u8; 32]).unwrap();
         let wallet = Wallet::from_seed([0x41u8; 32]);
         assert!(wallet.save_private_key(&path).is_err());
+    }
+
+    #[test]
+    fn wallet_signs_active_chain_transaction_format() {
+        let sender = Wallet::from_seed([0x51u8; 32]);
+        let recipient = Wallet::from_seed([0x52u8; 32]);
+        let recipient_bytes: [u8; 32] =
+            hex::decode(recipient.public_key_hex()).unwrap().try_into().unwrap();
+
+        let tx = sender
+            .sign_chain_transaction(2, 0, recipient_bytes, 3)
+            .unwrap();
+
+        tx.verify_protocol_version(2).unwrap();
+        assert_eq!(tx.sender, hex::decode(sender.public_key_hex()).unwrap().as_slice());
+        assert_eq!(tx.outputs[0].recipient, recipient_bytes);
+        assert_eq!(tx.outputs[0].amount, 3);
     }
 }
