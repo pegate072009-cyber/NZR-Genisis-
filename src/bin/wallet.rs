@@ -5,11 +5,7 @@ use nezora_supply::{
     blockchain::{persistence::load_chain, ConsensusParams},
     wallet::Wallet,
 };
-use std::{
-    fs::OpenOptions,
-    io::Write,
-    path::PathBuf,
-};
+use std::{fs::OpenOptions, io::Write, path::PathBuf};
 
 #[derive(Debug, Parser)]
 #[command(name = "wallet", version, about = "Nezora (NZR) local wallet utility")]
@@ -100,12 +96,8 @@ fn main() -> Result<()> {
             ensure!(balance >= amount, "insufficient confirmed balance");
             let nonce = *ledger.state.next_nonce.get(&sender).unwrap_or(&0);
 
-            let tx = wallet.sign_chain_transaction(
-                params.protocol_version,
-                nonce,
-                recipient,
-                amount,
-            )?;
+            let tx =
+                wallet.sign_chain_transaction(params.protocol_version, nonce, recipient, amount)?;
             tx.verify_protocol_version(params.protocol_version)?;
 
             let tx_id = hex::encode(tx.id());
