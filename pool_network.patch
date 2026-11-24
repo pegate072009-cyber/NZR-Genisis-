@@ -1,0 +1,101 @@
+diff --git a/src/blockchain/pool_network.rs b/src/blockchain/pool_network.rs
+--- a/src/blockchain/pool_network.rs
++++ b/src/blockchain/pool_network.rs
+@@
+     GetJob {
+         token: [u8; 32],
+     },
++    RegisterWorker {
++        token: [u8; 32],
++        nonce_start: u64,
++        nonce_stride: u64,
++    },
++    SubmitShare {
++        token: [u8; 32],
++        job_id: [u8; 32],
++        nonce: u64,
++    },
+ }
+@@
+     Job {
+         job_id: [u8; 32],
+         template: super::block::Block,
+         share_difficulty_bits: u16,
+         expires_at: u64,
+         nonce_start: u64,
+         nonce_stride: u64,
+     },
++    WorkerRegistered {
++        worker_id: [u8; 32],
++        nonce_start: u64,
++        nonce_stride: u64,
++    },
++    ShareAccepted {
++        accepted_share_count: usize,
++        worker_accepted_share_count: u64,
++        block_candidate_found: bool,
++    },
+     Error {
+@@
+         PoolTcpRequest::GetJob { token } => {
+@@
+             write_response(
+                 stream,
+                 &PoolTcpResponse::Job {
+@@
+                 },
+             )
+         }
++        PoolTcpRequest::RegisterWorker {
++            token,
++            nonce_start,
++            nonce_stride,
++        } => {
++            let Some(pool) = pool else {
++                send_error(stream, "worker registration is unavailable".to_owned())?;
++                return Ok(());
++            };
++            let worker_id = match pool.authenticated_worker(&token, now) {
++                Ok(worker_id) => worker_id,
++                Err(error) => {
++                    send_error(stream, error.to_string())?;
++                    return Ok(());
++                }
++            };
++            match pool.register_authenticated_worker(&token, now, nonce_start, nonce_stride) {
++                Ok(assignment) => write_response(
++                    stream,
++                    &PoolTcpResponse::WorkerRegistered {
++                        worker_id,
++                        nonce_start: assignment.nonce_start,
++                        nonce_stride: assignment.nonce_stride,
++                    },
++                ),
++                Err(error) => send_error(stream, error.to_string()),
++            }
++        }
++        PoolTcpRequest::SubmitShare { token, job_id, nonce } => {
++            let Some(pool) = pool else {
++                send_error(stream, "share submission is unavailable".to_owned())?;
++                return Ok(());
++            };
++            let worker_id = match pool.authenticated_worker(&token, now) {
++                Ok(worker_id) => worker_id,
++                Err(error) => {
++                    send_error(stream, error.to_string())?;
++                    return Ok(());
++                }
++            };
++            match pool.submit_share(worker_id, job_id, nonce, now) {
++                Ok(outcome) => write_response(
++                    stream,
++                    &PoolTcpResponse::ShareAccepted {
++                        accepted_share_count: outcome.accepted_share_count,
++                        worker_accepted_share_count: outcome.worker_accepted_share_count,
++                        block_candidate_found: outcome.block_candidate.is_some(),
++                    },
++                ),
++                Err(error) => send_error(stream, error.to_string()),
++            }
++        }
+     }
