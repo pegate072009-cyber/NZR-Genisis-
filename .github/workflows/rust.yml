@@ -11,12 +11,19 @@ env:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: cargo build --verbose
+
+      - name: Build solo miner release binary
+        run: cargo build --release --bin mine
+
+      - name: Check solo miner CLI
+        run: cargo run --release --bin mine -- --help
+
+      - name: Run tests
+        run: cargo test --verbose
