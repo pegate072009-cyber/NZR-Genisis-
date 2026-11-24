@@ -43,7 +43,9 @@ pub fn create_encrypted_backup(
     if let Err(error) = derive_result {
         seed.fill(0);
         derived_key.fill(0);
-        return Err(error).context("deriving encrypted-backup key");
+        return Err(anyhow::anyhow!(
+            "deriving encrypted-backup key: {error:?}"
+        ));
     }
 
     let cipher = Aes256Gcm::new_from_slice(&derived_key)
@@ -80,9 +82,12 @@ pub fn create_encrypted_backup(
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    let mut file = options
-        .open(output_path)
-        .with_context(|| format!("creating encrypted backup without overwriting: {}", output_path.display()))?;
+    let mut file = options.open(output_path).with_context(|| {
+        format!(
+            "creating encrypted backup without overwriting: {}",
+            output_path.display()
+        )
+    })?;
 
     file.write_all(MAGIC)?;
     file.write_all(&salt)?;
@@ -103,8 +108,14 @@ pub fn restore_encrypted_backup(
     let bytes = fs::read(backup_path)
         .with_context(|| format!("reading encrypted backup {}", backup_path.display()))?;
     let minimum = MAGIC.len() + SALT_LEN + NONCE_LEN + 32 + 16;
-    ensure!(bytes.len() == minimum, "encrypted backup has an invalid length");
-    ensure!(&bytes[..MAGIC.len()] == MAGIC, "unsupported wallet backup format");
+    ensure!(
+        bytes.len() == minimum,
+        "encrypted backup has an invalid length"
+    );
+    ensure!(
+        &bytes[..MAGIC.len()] == MAGIC,
+        "unsupported wallet backup format"
+    );
 
     let salt_start = MAGIC.len();
     let nonce_start = salt_start + SALT_LEN;
@@ -116,7 +127,9 @@ pub fn restore_encrypted_backup(
     let mut derived_key = [0u8; KEY_LEN];
     Argon2::new(Algorithm::Argon2id, Version::V0x13, Params::default())
         .hash_password_into(password, salt, &mut derived_key)
-        .context("deriving encrypted-backup key")?;
+        .map_err(|error| {
+            anyhow::anyhow!("deriving encrypted-backup key: {error:?}")
+        })?;
 
     let cipher = Aes256Gcm::new_from_slice(&derived_key)
         .map_err(|_| anyhow::anyhow!("invalid derived AES key"))?;
@@ -130,7 +143,10 @@ pub fn restore_encrypted_backup(
         )
         .map_err(|_| anyhow::anyhow!("wrong password or damaged wallet backup"))?;
     derived_key.fill(0);
-    ensure!(decrypted.len() == 32, "decrypted wallet seed has invalid length");
+    ensure!(
+        decrypted.len() == 32,
+        "decrypted wallet seed has invalid length"
+    );
 
     let mut seed = [0u8; 32];
     seed.copy_from_slice(&decrypted);
@@ -139,7 +155,12 @@ pub fn restore_encrypted_backup(
     let public_key = wallet.public_key_hex();
     wallet
         .save_private_key(output_wallet_path)
-        .with_context(|| format!("creating restored wallet without overwriting: {}", output_wallet_path.display()))?;
+        .with_context(|| {
+            format!(
+                "creating restored wallet without overwriting: {}",
+                output_wallet_path.display()
+            )
+        })?;
     let restored = Wallet::load_private_key(output_wallet_path)
         .context("verifying restored wallet key")?;
     ensure!(
@@ -166,12 +187,9 @@ mod tests {
         wallet.save_private_key(&wallet_path).unwrap();
 
         create_encrypted_backup(&wallet_path, &backup_path, b"correct horse battery").unwrap();
-        let actual = restore_encrypted_backup(
-            &backup_path,
-            &restored_path,
-            b"correct horse battery",
-        )
-        .unwrap();
+        let actual =
+            restore_encrypted_backup(&backup_path, &restored_path, b"correct horse battery")
+                .unwrap();
         assert_eq!(actual, expected);
     }
 
@@ -186,7 +204,9 @@ mod tests {
             .unwrap();
         create_encrypted_backup(&wallet_path, &backup_path, b"right password").unwrap();
 
-        assert!(restore_encrypted_backup(&backup_path, &restored_path, b"wrong password").is_err());
+        assert!(
+            restore_encrypted_backup(&backup_path, &restored_path, b"wrong password").is_err()
+        );
         assert!(!restored_path.exists());
     }
 
@@ -206,7 +226,9 @@ mod tests {
         bytes[last] ^= 0x01;
         fs::write(&backup_path, bytes).unwrap();
 
-        assert!(restore_encrypted_backup(&backup_path, &restored_path, b"backup password").is_err());
+        assert!(
+            restore_encrypted_backup(&backup_path, &restored_path, b"backup password").is_err()
+        );
         assert!(!restored_path.exists());
     }
 
