@@ -145,7 +145,10 @@ fn main() -> Result<()> {
             println!("This does not transfer funds until a valid block includes the transaction.");
         }
         Command::History { key, chain, limit } => {
-            ensure!(limit > 0 && limit <= 10_000, "--limit must be between 1 and 10000");
+            ensure!(
+                limit > 0 && limit <= 10_000,
+                "--limit must be between 1 and 10000"
+            );
             let params = ConsensusParams::default();
             let ledger = load_chain(&chain, &params)
                 .with_context(|| format!("loading chain {}", chain.display()))?;
@@ -227,7 +230,11 @@ fn print_transaction(tx: &Transaction, height: u64, wallet_address: [u8; 32]) {
         "Direction: {}",
         if tx.sender == wallet_address {
             "OUTGOING"
-        } else if tx.outputs.iter().any(|output| output.recipient == wallet_address) {
+        } else if tx
+            .outputs
+            .iter()
+            .any(|output| output.recipient == wallet_address)
+        {
             "INCOMING"
         } else {
             "CHAIN RECORD"
