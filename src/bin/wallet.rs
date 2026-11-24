@@ -26,6 +26,13 @@ enum Command {
         #[arg(long, default_value = "data/wallet.key")]
         key: PathBuf,
     },
+    /// Show confirmed balance and next transaction nonce.
+    Balance {
+        #[arg(long, default_value = "data/wallet.key")]
+        key: PathBuf,
+        #[arg(long, default_value = "data/chain.json")]
+        chain: PathBuf,
+    },
     /// Create and save a signed transaction file; this does not broadcast it.
     Send {
         #[arg(long, default_value = "data/wallet.key")]
@@ -79,6 +86,25 @@ fn main() -> Result<()> {
             let wallet = Wallet::load_private_key(&key)
                 .with_context(|| format!("loading wallet key from {}", key.display()))?;
             println!("Nezora wallet public key: {}", wallet.public_key_hex());
+        }
+        Command::Balance { key, chain } => {
+            let params = ConsensusParams::default();
+            let ledger = load_chain(&chain, &params)
+                .with_context(|| format!("loading chain {}", chain.display()))?;
+            let wallet = Wallet::load_private_key(&key)
+                .with_context(|| format!("loading wallet key {}", key.display()))?;
+            let address: [u8; 32] = hex::decode(wallet.public_key_hex())?
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("wallet public key must be 32 bytes"))?;
+            let balance = *ledger.state.balances.get(&address).unwrap_or(&0);
+            let next_nonce = *ledger.state.next_nonce.get(&address).unwrap_or(&0);
+
+            println!("Nezora wallet balance");
+            println!("Address: {}", wallet.public_key_hex());
+            println!("Confirmed balance: {balance} NZR units");
+            println!("Next transaction nonce: {next_nonce}");
+            println!("Chain height: {}", ledger.height());
+            println!("Pending transactions are not included.");
         }
         Command::Send {
             key,
