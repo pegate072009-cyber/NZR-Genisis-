@@ -127,9 +127,7 @@ pub fn restore_encrypted_backup(
     let mut derived_key = [0u8; KEY_LEN];
     Argon2::new(Algorithm::Argon2id, Version::V0x13, Params::default())
         .hash_password_into(password, salt, &mut derived_key)
-        .map_err(|error| {
-            anyhow::anyhow!("deriving encrypted-backup key: {error:?}")
-        })?;
+        .map_err(|error| anyhow::anyhow!("deriving encrypted-backup key: {error:?}"))?;
 
     let cipher = Aes256Gcm::new_from_slice(&derived_key)
         .map_err(|_| anyhow::anyhow!("invalid derived AES key"))?;
@@ -161,8 +159,8 @@ pub fn restore_encrypted_backup(
                 output_wallet_path.display()
             )
         })?;
-    let restored = Wallet::load_private_key(output_wallet_path)
-        .context("verifying restored wallet key")?;
+    let restored =
+        Wallet::load_private_key(output_wallet_path).context("verifying restored wallet key")?;
     ensure!(
         restored.public_key_hex() == public_key,
         "restored wallet public key does not match encrypted backup"
@@ -204,9 +202,7 @@ mod tests {
             .unwrap();
         create_encrypted_backup(&wallet_path, &backup_path, b"right password").unwrap();
 
-        assert!(
-            restore_encrypted_backup(&backup_path, &restored_path, b"wrong password").is_err()
-        );
+        assert!(restore_encrypted_backup(&backup_path, &restored_path, b"wrong password").is_err());
         assert!(!restored_path.exists());
     }
 
