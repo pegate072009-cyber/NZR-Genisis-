@@ -13,8 +13,30 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Build
+      - name: Build all targets
         run: cargo build --release --locked
+
+      - name: Build solo miner binary
+        run: cargo build --release --locked --bin mine
+
+      - name: Check solo miner CLI
+        run: cargo run --release --locked --bin mine -- --help
+
+      - name: Build wallet binary
+        run: cargo build --release --locked --bin wallet
+
+      - name: Check wallet CLI
+        run: cargo run --release --locked --bin wallet -- --help
+
+      - name: Test wallet create and info using temporary key
+        shell: bash
+        run: |
+          set -euo pipefail
+          WALLET_KEY="$RUNNER_TEMP/nezora-ci-wallet.key"
+          cargo run --release --locked --bin wallet -- create --key "$WALLET_KEY"
+          test -f "$WALLET_KEY"
+          cargo run --release --locked --bin wallet -- info --key "$WALLET_KEY"
+          rm -f "$WALLET_KEY"
 
       - name: Test
         run: cargo test --release --locked
