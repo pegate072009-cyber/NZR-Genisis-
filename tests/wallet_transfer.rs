@@ -42,10 +42,14 @@ fn signed_wallet_transfer_updates_balances_and_nonce_after_block_acceptance() {
     let recipient = Wallet::from_seed([0x62; 32]);
     let miner_two = [0x64; 32];
 
-    let sender_address: [u8; 32] =
-        hex::decode(sender.public_key_hex()).unwrap().try_into().unwrap();
-    let recipient_address: [u8; 32] =
-        hex::decode(recipient.public_key_hex()).unwrap().try_into().unwrap();
+    let sender_address: [u8; 32] = hex::decode(sender.public_key_hex())
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let recipient_address: [u8; 32] = hex::decode(recipient.public_key_hex())
+        .unwrap()
+        .try_into()
+        .unwrap();
 
     // First block gives the sender one development NZR unit.
     mine_and_accept(&mut chain, sender_address, Vec::new(), NOW, &params);
@@ -85,8 +89,10 @@ fn tampered_wallet_transaction_is_rejected_before_block_acceptance() {
     let mut chain = Chain::default();
     let sender = Wallet::from_seed([0x71; 32]);
     let recipient = Wallet::from_seed([0x72; 32]);
-    let recipient_address: [u8; 32] =
-        hex::decode(recipient.public_key_hex()).unwrap().try_into().unwrap();
+    let recipient_address: [u8; 32] = hex::decode(recipient.public_key_hex())
+        .unwrap()
+        .try_into()
+        .unwrap();
 
     let mut tx = sender
         .sign_chain_transaction(params.protocol_version, 0, recipient_address, 1)
@@ -115,10 +121,14 @@ fn wallet_transfer_exceeding_confirmed_balance_is_rejected_atomically() {
     let mut chain = Chain::default();
     let sender = Wallet::from_seed([0x81; 32]);
     let recipient = Wallet::from_seed([0x82; 32]);
-    let sender_address: [u8; 32] =
-        hex::decode(sender.public_key_hex()).unwrap().try_into().unwrap();
-    let recipient_address: [u8; 32] =
-        hex::decode(recipient.public_key_hex()).unwrap().try_into().unwrap();
+    let sender_address: [u8; 32] = hex::decode(sender.public_key_hex())
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let recipient_address: [u8; 32] = hex::decode(recipient.public_key_hex())
+        .unwrap()
+        .try_into()
+        .unwrap();
 
     // Give sender exactly one unit.
     mine_and_accept(&mut chain, sender_address, Vec::new(), NOW, &params);
