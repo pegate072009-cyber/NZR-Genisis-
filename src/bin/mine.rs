@@ -33,7 +33,10 @@ fn main() -> Result<()> {
 
     ensure!(
         args.miner_address.len() == 64
-            && args.miner_address.bytes().all(|byte| byte.is_ascii_hexdigit()),
+            && args
+                .miner_address
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit()),
         "--miner-address must be exactly 64 hexadecimal characters"
     );
     let decoded = hex::decode(&args.miner_address).context("decoding miner address")?;
