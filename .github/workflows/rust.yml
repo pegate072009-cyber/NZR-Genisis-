@@ -25,5 +25,11 @@ jobs:
       - name: Check solo miner CLI
         run: cargo run --release --bin mine -- --help
 
+      - name: Build wallet release binary
+        run: cargo build --release --bin wallet
+
+      - name: Check wallet CLI
+        run: cargo run --release --bin wallet -- --help
+
       - name: Run tests
         run: cargo test --verbose
