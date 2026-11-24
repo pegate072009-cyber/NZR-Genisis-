@@ -10,6 +10,7 @@ pub mod state;
 pub mod storage;
 pub mod transaction;
 pub mod wallet;
+pub mod wallet_backup;
 
 pub const NETWORK_NAME: &str = "Nezora";
 pub const TICKER: &str = "NZR";
