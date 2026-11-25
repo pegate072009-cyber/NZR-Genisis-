@@ -4,6 +4,7 @@ pub mod consensus;
 pub mod mempool;
 pub mod merkle;
 pub mod mining;
+pub mod peer_network;
 pub mod persistence;
 pub mod pool_network;
 pub mod state;
