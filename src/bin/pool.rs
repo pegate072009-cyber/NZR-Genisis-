@@ -17,7 +17,11 @@ use std::{
 };
 
 #[derive(Debug, Parser)]
-#[command(name = "nezora-pool", version, about = "Nezora local pool server (development/testnet)")]
+#[command(
+    name = "nezora-pool",
+    version,
+    about = "Nezora local pool server (development/testnet)"
+)]
 struct Args {
     /// Pool operator reward address: exactly 64 hexadecimal characters.
     #[arg(long)]
@@ -138,7 +142,10 @@ fn publish_fresh_job(
 fn main() -> Result<()> {
     let args = Args::parse();
     let miner_address = parse_address(&args.miner_address)?;
-    ensure!(args.job_ttl_seconds > 0, "--job-ttl-seconds must be positive");
+    ensure!(
+        args.job_ttl_seconds > 0,
+        "--job-ttl-seconds must be positive"
+    );
     ensure!(
         args.share_difficulty_bits <= 255,
         "--share-difficulty-bits cannot exceed 255"
@@ -217,14 +224,21 @@ fn main() -> Result<()> {
                             chain.height(),
                             block_hash
                         );
-                        if let Err(error) =
-                            publish_fresh_job(&mut pool, &chain, miner_address, unix_time()?, &args, &params)
-                        {
+                        if let Err(error) = publish_fresh_job(
+                            &mut pool,
+                            &chain,
+                            miner_address,
+                            unix_time()?,
+                            &args,
+                            &params,
+                        ) {
                             eprintln!("Block saved, but publishing the next job failed: {error:#}");
                         }
                     }
                     Err(error) => {
-                        eprintln!("Candidate validated but chain save failed; not committing in memory: {error:#}");
+                        eprintln!(
+                            "Candidate validated but chain save failed; not committing in memory: {error:#}"
+                        );
                     }
                 },
                 Err(error) => {
