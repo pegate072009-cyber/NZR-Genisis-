@@ -4,7 +4,7 @@ use nezora_supply::{
     blockchain::{
         block::Block,
         consensus::expected_difficulty_bits,
-        mining::MiningPoolCoordinator,
+        mining::{meets_target, MiningPoolCoordinator},
         persistence::{load_chain, save_chain},
         pool_network::PoolTcpServer,
         Chain, ConsensusParams,
@@ -246,5 +246,78 @@ fn main() -> Result<()> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_valid_miner_address() {
+        let address = "ab".repeat(32);
+        assert_eq!(parse_address(&address).unwrap(), [0xabu8; 32]);
+    }
+
+    #[test]
+    fn rejects_invalid_miner_addresses() {
+        assert!(parse_address("abcd").is_err());
+        assert!(parse_address(&"zz".repeat(32)).is_err());
+    }
+
+    #[test]
+    fn creates_template_from_current_chain_tip() {
+        let chain = Chain::default();
+        let params = ConsensusParams::default();
+        let template = create_job_template(&chain, [9; 32], 1_000_000, &params).unwrap();
+
+        assert_eq!(template.height, 1);
+        assert_eq!(template.previous_hash, [0; 32]);
+        assert_eq!(template.reward_coin_number, params.block_reward);
+        assert_eq!(template.miner_address, [9; 32]);
+        assert_eq!(
+            template.difficulty_bits,
+            expected_difficulty_bits(&chain, 1, &params).unwrap()
+        );
+        assert_eq!(
+            template.transaction_root,
+            template.calculate_transaction_root()
+        );
+    }
+
+    #[test]
+    fn mined_pool_template_is_accepted_and_persisted_by_chain() {
+        let params = ConsensusParams::default();
+        let original = Chain::default();
+        let mut candidate =
+            create_job_template(&original, [7; 32], 1_000_000, &params).unwrap();
+
+        while !meets_target(&candidate.hash(), candidate.difficulty_bits) {
+            candidate.nonce = candidate.nonce.checked_add(1).unwrap();
+        }
+
+        let mut updated = original.clone();
+        updated
+            .accept_block(candidate, &params, 1_000_000)
+            .unwrap();
+        assert_eq!(updated.height(), 1);
+
+        let directory = tempfile::tempdir().unwrap();
+        let chain_path = directory.path().join("chain.json");
+        save_chain(&chain_path, &updated, &params).unwrap();
+
+        let reloaded = load_chain(&chain_path, &params).unwrap();
+        assert_eq!(reloaded.height(), 1);
+        assert_eq!(reloaded.tip_hash(), updated.tip_hash());
+        assert!(reloaded.verify_integrity(&params).is_ok());
+    }
+
+    #[test]
+    fn refuses_to_create_job_after_maximum_supply() {
+        let params = ConsensusParams::default();
+        let mut chain = Chain::default();
+        chain.state.issued_coin_count = params.max_supply;
+
+        assert!(create_job_template(&chain, [1; 32], 1_000_000, &params).is_err());
     }
 }
