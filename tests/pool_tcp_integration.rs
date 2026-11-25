@@ -69,8 +69,8 @@ fn worker_authenticates_registers_gets_job_and_submits_share_over_tcp() {
     let signing_key = SigningKey::from_bytes(&[77; 32]);
     let worker_id = signing_key.verifying_key().to_bytes();
 
-    let mut pool = MiningPoolCoordinator::new_with_pplns_config(4, 20, 10, 100)
-        .expect("create pool");
+    let mut pool =
+        MiningPoolCoordinator::new_with_pplns_config(4, 20, 10, 100).expect("create pool");
     let job_id = pool
         .publish_job(test_template(), 0, 1_000)
         .expect("publish job");
@@ -149,11 +149,8 @@ fn worker_authenticates_registers_gets_job_and_submits_share_over_tcp() {
     );
 
     // Worker obtains the current job and its nonce assignment.
-    let (pool, job_response) = request_with_state(
-        pool,
-        state_path.clone(),
-        PoolTcpRequest::GetJob { token },
-    );
+    let (pool, job_response) =
+        request_with_state(pool, state_path.clone(), PoolTcpRequest::GetJob { token });
     match job_response {
         PoolTcpResponse::Job {
             job_id: returned_job,
