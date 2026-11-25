@@ -1,4 +1,3 @@
-
 name: Generate Cargo Lockfile
 
 on:
@@ -6,9 +5,13 @@ on:
   push:
     branches:
       - main
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/lockfile.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   generate-lockfile:
@@ -16,6 +19,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
@@ -26,11 +31,15 @@ jobs:
       - name: Validate locked dependency resolution
         run: cargo check --locked
 
-      - name: Upload Cargo.lock
-        uses: actions/upload-artifact@v4
-        with:
-          name: nezora-cargo-lockfile
-          path: Cargo.lock
-          if-no-files-found: error
-          retention-days: 7
-          
+      - name: Commit updated Cargo.lock
+        run: |
+          if git diff --quiet -- Cargo.lock; then
+            echo "Cargo.lock is already up to date."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.lock
+          git commit -m "Update Cargo.lock"
+          git push origin HEAD:main
