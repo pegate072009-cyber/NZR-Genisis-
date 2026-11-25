@@ -226,15 +226,30 @@ mod tests {
         let server = PoolTcpServer::bind_loopback(0).unwrap();
         let address = server.local_addr().unwrap();
         let worker = thread::spawn(move || server.serve_one().unwrap());
-        let response = send_request(address, &PoolTcpRequest::RegisterWorker { token: [0; 32], nonce_start: 0, nonce_stride: 1 });
+        let response = send_request(
+            address,
+            &PoolTcpRequest::RegisterWorker {
+                token: [0; 32],
+                nonce_start: 0,
+                nonce_stride: 1,
+            },
+        );
         worker.join().unwrap();
         assert!(matches!(response, PoolTcpResponse::Error { .. }));
     }
     #[test]
     fn register_and_submit_share_requests_round_trip() {
         let requests = [
-            PoolTcpRequest::RegisterWorker { token: [1; 32], nonce_start: 3, nonce_stride: 2 },
-            PoolTcpRequest::SubmitShare { token: [2; 32], job_id: [3; 32], nonce: 9 },
+            PoolTcpRequest::RegisterWorker {
+                token: [1; 32],
+                nonce_start: 3,
+                nonce_stride: 2,
+            },
+            PoolTcpRequest::SubmitShare {
+                token: [2; 32],
+                job_id: [3; 32],
+                nonce: 9,
+            },
         ];
         for request in requests {
             let json = serde_json::to_vec(&request).unwrap();
