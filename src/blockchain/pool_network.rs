@@ -157,7 +157,7 @@ fn read_frame(stream: &mut TcpStream) -> Result<Vec<u8>> {
     loop {
         match stream.read(&mut byte) {
             Ok(0) => anyhow::bail!("pool TCP client closed before sending a complete frame"),
-            Ok(_) if byte[0] == b'\\n' => break,
+            Ok(_) if byte[0] == b'\n' => break,
             Ok(_) => {
                 ensure!(
                     frame.len() < MAX_POOL_TCP_FRAME_BYTES,
@@ -174,7 +174,7 @@ fn read_frame(stream: &mut TcpStream) -> Result<Vec<u8>> {
 
 fn write_response(stream: &mut TcpStream, response: &PoolTcpResponse) -> Result<()> {
     let mut bytes = serde_json::to_vec(response).context("could not encode pool TCP response")?;
-    bytes.push(b'\\n');
+    bytes.push(b'\n');
     stream
         .write_all(&bytes)
         .context("could not write pool TCP response")?;
@@ -274,7 +274,12 @@ fn handle_connection(
             };
             let registration = if let Some(path) = state_path {
                 let mut updated = pool.clone();
-                match updated.register_authenticated_worker(&token, now, nonce_start, nonce_stride) {
+                match updated.register_authenticated_worker(
+                    &token,
+                    now,
+                    nonce_start,
+                    nonce_stride,
+                ) {
                     Ok(assignment) => match updated.save_to_file(path) {
                         Ok(()) => {
                             *pool = updated;
@@ -375,7 +380,7 @@ mod tests {
     fn send_request(address: SocketAddr, request: &PoolTcpRequest) -> PoolTcpResponse {
         let mut stream = TcpStream::connect(address).unwrap();
         let mut bytes = serde_json::to_vec(request).unwrap();
-        bytes.push(b'\\n');
+        bytes.push(b'\n');
         stream.write_all(&bytes).unwrap();
         let mut response = String::new();
         BufReader::new(stream).read_line(&mut response).unwrap();
@@ -411,7 +416,7 @@ mod tests {
         let address = server.local_addr().unwrap();
         let worker = thread::spawn(move || server.serve_one().unwrap());
         let mut stream = TcpStream::connect(address).unwrap();
-        stream.write_all(b"{\\"type\\":\\"unknown\\"}\\n").unwrap();
+        stream.write_all(b"{\"type\":\"unknown\"}\n").unwrap();
         let mut response = String::new();
         BufReader::new(stream).read_line(&mut response).unwrap();
         worker.join().unwrap();
