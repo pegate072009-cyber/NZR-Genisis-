@@ -90,7 +90,13 @@ fn request(address: SocketAddr, message: &PoolTcpRequest) -> Result<PoolTcpRespo
 fn get_job(
     address: SocketAddr,
     token: [u8; 32],
-) -> Result<([u8; 32], nezora_supply::blockchain::block::Block, u16, u64, u64)> {
+) -> Result<(
+    [u8; 32],
+    nezora_supply::blockchain::block::Block,
+    u16,
+    u64,
+    u64,
+)> {
     match request(address, &PoolTcpRequest::GetJob { token })? {
         PoolTcpResponse::Job {
             job_id,
@@ -311,6 +317,9 @@ fn main() -> Result<()> {
     println!("Hashes checked: {hashes_checked}");
     println!("Shares accepted: {accepted_shares}");
     println!("Job changes detected: {job_refreshes}");
-    println!("Duplicate nonce submissions prevented: {}", submitted_nonces.len());
+    println!(
+        "Duplicate nonce submissions prevented: {}",
+        submitted_nonces.len()
+    );
     Ok(())
 }
