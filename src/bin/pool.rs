@@ -289,17 +289,14 @@ mod tests {
     fn mined_pool_template_is_accepted_and_persisted_by_chain() {
         let params = ConsensusParams::default();
         let original = Chain::default();
-        let mut candidate =
-            create_job_template(&original, [7; 32], 1_000_000, &params).unwrap();
+        let mut candidate = create_job_template(&original, [7; 32], 1_000_000, &params).unwrap();
 
         while !meets_target(&candidate.hash(), candidate.difficulty_bits) {
             candidate.nonce = candidate.nonce.checked_add(1).unwrap();
         }
 
         let mut updated = original.clone();
-        updated
-            .accept_block(candidate, &params, 1_000_000)
-            .unwrap();
+        updated.accept_block(candidate, &params, 1_000_000).unwrap();
         assert_eq!(updated.height(), 1);
 
         let directory = tempfile::tempdir().unwrap();
