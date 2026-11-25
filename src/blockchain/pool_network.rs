@@ -188,7 +188,9 @@ mod tests {
 
     #[test]
     fn binds_only_to_loopback() {
-        assert!(PoolTcpServer::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)).is_err());
+        assert!(
+            PoolTcpServer::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0)).is_err()
+        );
     }
     #[test]
     fn serves_ping_over_loopback_tcp() {
@@ -197,7 +199,13 @@ mod tests {
         let worker = thread::spawn(move || server.serve_one().unwrap());
         let response = send_request(address, &PoolTcpRequest::Ping {});
         worker.join().unwrap();
-        assert_eq!(response, PoolTcpResponse::Pong { protocol: "nezora-pool".to_owned(), version: 1 });
+        assert_eq!(
+            response,
+            PoolTcpResponse::Pong {
+                protocol: "nezora-pool".to_owned(),
+                version: 1
+            }
+        );
     }
     #[test]
     fn rejects_unknown_request_type() {
@@ -209,7 +217,10 @@ mod tests {
         let mut response = String::new();
         BufReader::new(stream).read_line(&mut response).unwrap();
         worker.join().unwrap();
-        assert!(matches!(serde_json::from_str::<PoolTcpResponse>(response.trim()).unwrap(), PoolTcpResponse::Error { .. }));
+        assert!(matches!(
+            serde_json::from_str::<PoolTcpResponse>(response.trim()).unwrap(),
+            PoolTcpResponse::Error { .. }
+        ));
     }
     #[test]
     fn rejects_oversized_frame() {
@@ -217,7 +228,9 @@ mod tests {
         let address = server.local_addr().unwrap();
         let worker = thread::spawn(move || server.serve_one().unwrap_err());
         let mut stream = TcpStream::connect(address).unwrap();
-        stream.write_all(&vec![b'a'; MAX_POOL_TCP_FRAME_BYTES + 1]).unwrap();
+        stream
+            .write_all(&vec![b'a'; MAX_POOL_TCP_FRAME_BYTES + 1])
+            .unwrap();
         stream.write_all(b"\n").unwrap();
         assert!(worker.join().unwrap().to_string().contains("size limit"));
     }
