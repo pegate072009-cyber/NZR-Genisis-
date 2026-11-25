@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     io::{Read, Write},
     net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream},
+    path::Path,
     time::Duration,
 };
 
@@ -108,17 +109,29 @@ impl PoolTcpServer {
     }
 
     pub fn serve_one(&self) -> Result<()> {
-        self.serve_connection(None, 0)
+        self.serve_connection(None, 0, None)
     }
 
     pub fn serve_one_with_pool(&self, pool: &mut MiningPoolCoordinator, now: u64) -> Result<()> {
-        self.serve_connection(Some(pool), now)
+        self.serve_connection(Some(pool), now, None)
+    }
+
+    /// Serves one client and persists durable pool changes before replying.
+    /// Authentication challenges and sessions remain intentionally ephemeral.
+    pub fn serve_one_with_pool_state(
+        &self,
+        pool: &mut MiningPoolCoordinator,
+        now: u64,
+        state_path: &Path,
+    ) -> Result<()> {
+        self.serve_connection(Some(pool), now, Some(state_path))
     }
 
     fn serve_connection(
         &self,
         mut pool: Option<&mut MiningPoolCoordinator>,
         now: u64,
+        state_path: Option<&Path>,
     ) -> Result<()> {
         let (mut stream, peer) = self
             .listener
@@ -134,7 +147,7 @@ impl PoolTcpServer {
         stream
             .set_nodelay(true)
             .context("could not enable TCP_NODELAY for pool client")?;
-        handle_connection(&mut stream, pool.as_deref_mut(), now)
+        handle_connection(&mut stream, pool.as_deref_mut(), now, state_path)
     }
 }
 
@@ -144,7 +157,7 @@ fn read_frame(stream: &mut TcpStream) -> Result<Vec<u8>> {
     loop {
         match stream.read(&mut byte) {
             Ok(0) => anyhow::bail!("pool TCP client closed before sending a complete frame"),
-            Ok(_) if byte[0] == b'\n' => break,
+            Ok(_) if byte[0] == b'\\n' => break,
             Ok(_) => {
                 ensure!(
                     frame.len() < MAX_POOL_TCP_FRAME_BYTES,
@@ -161,7 +174,7 @@ fn read_frame(stream: &mut TcpStream) -> Result<Vec<u8>> {
 
 fn write_response(stream: &mut TcpStream, response: &PoolTcpResponse) -> Result<()> {
     let mut bytes = serde_json::to_vec(response).context("could not encode pool TCP response")?;
-    bytes.push(b'\n');
+    bytes.push(b'\\n');
     stream
         .write_all(&bytes)
         .context("could not write pool TCP response")?;
@@ -176,6 +189,7 @@ fn handle_connection(
     stream: &mut TcpStream,
     pool: Option<&mut MiningPoolCoordinator>,
     now: u64,
+    state_path: Option<&Path>,
 ) -> Result<()> {
     let frame = match read_frame(stream) {
         Ok(frame) => frame,
@@ -258,7 +272,22 @@ fn handle_connection(
                 Ok(id) => id,
                 Err(error) => return send_error(stream, error.to_string()),
             };
-            match pool.register_authenticated_worker(&token, now, nonce_start, nonce_stride) {
+            let registration = if let Some(path) = state_path {
+                let mut updated = pool.clone();
+                match updated.register_authenticated_worker(&token, now, nonce_start, nonce_stride) {
+                    Ok(assignment) => match updated.save_to_file(path) {
+                        Ok(()) => {
+                            *pool = updated;
+                            Ok(assignment)
+                        }
+                        Err(error) => Err(error),
+                    },
+                    Err(error) => Err(error),
+                }
+            } else {
+                pool.register_authenticated_worker(&token, now, nonce_start, nonce_stride)
+            };
+            match registration {
                 Ok(assignment) => write_response(
                     stream,
                     &PoolTcpResponse::WorkerRegistered {
@@ -305,7 +334,12 @@ fn handle_connection(
                 Ok(id) => id,
                 Err(error) => return send_error(stream, error.to_string()),
             };
-            match pool.submit_share(worker_id, job_id, nonce, now) {
+            let submission = if let Some(path) = state_path {
+                pool.submit_share_and_save(worker_id, job_id, nonce, now, path)
+            } else {
+                pool.submit_share(worker_id, job_id, nonce, now)
+            };
+            match submission {
                 Ok(outcome) => write_response(
                     stream,
                     &PoolTcpResponse::ShareAccepted {
@@ -341,7 +375,7 @@ mod tests {
     fn send_request(address: SocketAddr, request: &PoolTcpRequest) -> PoolTcpResponse {
         let mut stream = TcpStream::connect(address).unwrap();
         let mut bytes = serde_json::to_vec(request).unwrap();
-        bytes.push(b'\n');
+        bytes.push(b'\\n');
         stream.write_all(&bytes).unwrap();
         let mut response = String::new();
         BufReader::new(stream).read_line(&mut response).unwrap();
@@ -377,7 +411,7 @@ mod tests {
         let address = server.local_addr().unwrap();
         let worker = thread::spawn(move || server.serve_one().unwrap());
         let mut stream = TcpStream::connect(address).unwrap();
-        stream.write_all(b"{\"type\":\"unknown\"}\n").unwrap();
+        stream.write_all(b"{\\"type\\":\\"unknown\\"}\\n").unwrap();
         let mut response = String::new();
         BufReader::new(stream).read_line(&mut response).unwrap();
         worker.join().unwrap();
@@ -396,7 +430,7 @@ mod tests {
         stream
             .write_all(&vec![b'a'; MAX_POOL_TCP_FRAME_BYTES + 1])
             .unwrap();
-        stream.write_all(b"\n").unwrap();
+        stream.write_all(b"\\n").unwrap();
         assert!(worker.join().unwrap().to_string().contains("size limit"));
     }
 
