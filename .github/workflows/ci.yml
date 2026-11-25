@@ -5,12 +5,21 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  workflow_run:
+    workflows: ["Generate Cargo Lockfile"]
+    types: [completed]
+    branches: [main]
 
 jobs:
   test:
+    # GitHub suppresses push-triggered workflows created with GITHUB_TOKEN.
+    # This workflow_run trigger starts CI after the lockfile workflow finishes.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Build all targets
