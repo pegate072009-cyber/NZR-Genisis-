@@ -148,9 +148,15 @@ fn main() -> Result<()> {
             nonce_start,
             nonce_stride,
         } => {
-            ensure!(registered_worker == worker_id, "registered worker key mismatch");
+            ensure!(
+                registered_worker == worker_id,
+                "registered worker key mismatch"
+            );
             ensure!(nonce_start == args.nonce_start, "pool changed nonce start");
-            ensure!(nonce_stride == args.nonce_stride, "pool changed nonce stride");
+            ensure!(
+                nonce_stride == args.nonce_stride,
+                "pool changed nonce stride"
+            );
         }
         other => anyhow::bail!("expected worker registration, received {other:?}"),
     }
@@ -165,7 +171,13 @@ fn main() -> Result<()> {
                 nonce_start,
                 nonce_stride,
                 ..
-            } => (job_id, template, share_difficulty_bits, nonce_start, nonce_stride),
+            } => (
+                job_id,
+                template,
+                share_difficulty_bits,
+                nonce_start,
+                nonce_stride,
+            ),
             other => anyhow::bail!("expected mining job, received {other:?}"),
         };
 
