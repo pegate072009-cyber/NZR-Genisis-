@@ -7,3 +7,5 @@
 *.secret
 .env
 .env.*
+/data/
+/backup/
