@@ -90,10 +90,7 @@ fn main() -> Result<()> {
     println!("Pool: {}", args.pool);
     println!("Worker public key: {}", hex::encode(worker_id));
 
-    let challenge_response = request(
-        args.pool,
-        &PoolTcpRequest::AuthChallenge { worker_id },
-    )?;
+    let challenge_response = request(args.pool, &PoolTcpRequest::AuthChallenge { worker_id })?;
     let (challenge_id, nonce, expires_at) = match challenge_response {
         PoolTcpResponse::Challenge {
             challenge_id,
@@ -101,7 +98,10 @@ fn main() -> Result<()> {
             nonce,
             expires_at,
         } => {
-            ensure!(challenged_worker == worker_id, "pool challenge worker key mismatch");
+            ensure!(
+                challenged_worker == worker_id,
+                "pool challenge worker key mismatch"
+            );
             (challenge_id, nonce, expires_at)
         }
         other => anyhow::bail!("expected authentication challenge, received {other:?}"),
@@ -128,7 +128,10 @@ fn main() -> Result<()> {
             token,
             ..
         } => {
-            ensure!(authenticated_worker == worker_id, "authenticated worker key mismatch");
+            ensure!(
+                authenticated_worker == worker_id,
+                "authenticated worker key mismatch"
+            );
             token
         }
         other => anyhow::bail!("expected authenticated response, received {other:?}"),
