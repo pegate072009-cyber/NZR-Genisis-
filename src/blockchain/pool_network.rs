@@ -126,28 +126,42 @@ fn handle_connection(stream: &mut TcpStream, pool: Option<&mut MiningPoolCoordin
                 Ok(id) => id, Err(error) => return send_error(stream, error.to_string()),
             };
             match pool.register_authenticated_worker(&token, now, nonce_start, nonce_stride) {
-                Ok(assignment) => write_response(stream, &PoolTcpResponse::WorkerRegistered {
-                    worker_id, nonce_start: assignment.nonce_start, nonce_stride: assignment.nonce_stride,
-                }),
+                Ok(assignment) => write_response(
+                    stream,
+                    &PoolTcpResponse::WorkerRegistered {
+                        worker_id,
+                        nonce_start: assignment.nonce_start,
+                        nonce_stride: assignment.nonce_stride,
+                    },
+                ),
                 Err(error) => send_error(stream, error.to_string()),
             }
         }
         PoolTcpRequest::GetJob { token } => {
             let worker_id = match pool.authenticated_worker(&token, now) {
-                Ok(id) => id, Err(error) => return send_error(stream, error.to_string()),
+                Ok(id) => id,
+                Err(error) => return send_error(stream, error.to_string()),
             };
             let assignment = match pool.worker_assignment(&worker_id) {
-                Some(value) => value, None => return send_error(stream, "worker is not registered".to_owned()),
+                Some(value) => value,
+                None => return send_error(stream, "worker is not registered".to_owned()),
             };
             let job = match pool.active_job() {
                 Some(job) if now < job.expires_at => job.clone(),
                 Some(_) => return send_error(stream, "active pool job has expired".to_owned()),
                 None => return send_error(stream, "no active pool job".to_owned()),
             };
-            write_response(stream, &PoolTcpResponse::Job {
-                job_id: job.job_id, template: job.template, share_difficulty_bits: job.share_difficulty_bits,
-                expires_at: job.expires_at, nonce_start: assignment.nonce_start, nonce_stride: assignment.nonce_stride,
-            })
+            write_response(
+                stream,
+                &PoolTcpResponse::Job {
+                    job_id: job.job_id,
+                    template: job.template,
+                    share_difficulty_bits: job.share_difficulty_bits,
+                    expires_at: job.expires_at,
+                    nonce_start: assignment.nonce_start,
+                    nonce_stride: assignment.nonce_stride,
+                },
+            )
         }
         PoolTcpRequest::SubmitShare {
             token,
