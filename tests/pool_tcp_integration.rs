@@ -9,6 +9,7 @@ use std::{
     net::{SocketAddr, TcpStream},
     path::PathBuf,
     thread,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 fn send_request(address: SocketAddr, request: &PoolTcpRequest) -> PoolTcpResponse {
@@ -43,6 +44,14 @@ fn request_with_state(
     (pool, response)
 }
 
+fn current_test_expiry() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock before Unix epoch")
+        .as_secs()
+        + 3_600
+}
+
 fn test_template() -> Block {
     let mut template = Block {
         version: 1,
@@ -72,7 +81,7 @@ fn worker_authenticates_registers_gets_job_and_submits_share_over_tcp() {
     let mut pool =
         MiningPoolCoordinator::new_with_pplns_config(4, 20, 10, 100).expect("create pool");
     let job_id = pool
-        .publish_job(test_template(), 0, 1_000)
+        .publish_job(test_template(), 0, current_test_expiry())
         .expect("publish job");
     pool.save_to_file(&state_path).expect("save initial state");
 

@@ -258,6 +258,35 @@ fn main() -> Result<()> {
             let (current_job_id, _, _, _, _) = get_job(args.pool, token)?;
             if current_job_id != job_id {
                 println!("Job changed; discarding candidate from the old job.");
+                match request(
+                    args.pool,
+                    &PoolTcpRequest::RegisterWorker {
+                        token,
+                        nonce_start: args.nonce_start,
+                        nonce_stride: args.nonce_stride,
+                    },
+                )? {
+                    PoolTcpResponse::WorkerRegistered {
+                        worker_id: registered_worker,
+                        nonce_start: registered_nonce_start,
+                        nonce_stride: registered_nonce_stride,
+                    } => {
+                        ensure!(
+                            registered_worker == worker_id,
+                            "registered worker key mismatch"
+                        );
+                        ensure!(
+                            registered_nonce_start == args.nonce_start,
+                            "pool changed nonce start"
+                        );
+                        ensure!(
+                            registered_nonce_stride == args.nonce_stride,
+                            "pool changed nonce stride"
+                        );
+                    }
+                    other => anyhow::bail!("expected worker registration, received {other:?}"),
+                }
+
                 let refreshed = get_job(args.pool, token)?;
                 job_id = refreshed.0;
                 template = refreshed.1;
@@ -296,6 +325,35 @@ fn main() -> Result<()> {
         }
 
         if attempt % args.job_check_interval == 0 && !stop.load(Ordering::SeqCst) {
+            match request(
+                args.pool,
+                &PoolTcpRequest::RegisterWorker {
+                    token,
+                    nonce_start: args.nonce_start,
+                    nonce_stride: args.nonce_stride,
+                },
+            )? {
+                PoolTcpResponse::WorkerRegistered {
+                    worker_id: registered_worker,
+                    nonce_start: registered_nonce_start,
+                    nonce_stride: registered_nonce_stride,
+                } => {
+                    ensure!(
+                        registered_worker == worker_id,
+                        "registered worker key mismatch"
+                    );
+                    ensure!(
+                        registered_nonce_start == args.nonce_start,
+                        "pool changed nonce start"
+                    );
+                    ensure!(
+                        registered_nonce_stride == args.nonce_stride,
+                        "pool changed nonce stride"
+                    );
+                }
+                other => anyhow::bail!("expected worker registration, received {other:?}"),
+            }
+
             let refreshed = get_job(args.pool, token)?;
             if refreshed.0 != job_id {
                 println!("New job detected; switching templates.");

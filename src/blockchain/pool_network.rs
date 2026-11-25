@@ -4,7 +4,7 @@ use std::{
     io::{Read, Write},
     net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener, TcpStream},
     path::Path,
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use super::mining::{MiningPoolCoordinator, PoolAuthChallenge};
@@ -142,13 +142,19 @@ impl PoolTcpServer {
     fn serve_connection(
         &self,
         mut pool: Option<&mut MiningPoolCoordinator>,
-        now: u64,
+        _now: u64,
         state_path: Option<&Path>,
     ) -> Result<Option<super::block::Block>> {
         let (mut stream, peer) = self
             .listener
             .accept()
             .context("could not accept pool TCP client")?;
+
+        // Use a fresh timestamp after accepting the client.
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .context("system clock is before Unix epoch")?
+            .as_secs();
         ensure!(peer.ip().is_loopback(), "rejected non-loopback pool client");
         stream
             .set_read_timeout(Some(POOL_TCP_IO_TIMEOUT))

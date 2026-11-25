@@ -178,6 +178,9 @@ fn verify_pinned(
 }
 
 fn create_new_key_file(path: &Path, bytes: &[u8], private: bool) -> Result<()> {
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
 
@@ -190,6 +193,13 @@ fn create_new_key_file(path: &Path, bytes: &[u8], private: bool) -> Result<()> {
     let mut file = options
         .open(path)
         .with_context(|| format!("creating key file without overwriting: {}", path.display()))?;
+    file.set_permissions(std::fs::Permissions::from_mode(if private {
+        0o600
+    } else {
+        0o644
+    }))
+    .with_context(|| format!("setting key file permissions: {}", path.display()))?;
+
     file.write_all(bytes)
         .with_context(|| format!("writing key file {}", path.display()))?;
     file.sync_all()
