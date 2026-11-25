@@ -1,7 +1,4 @@
-use nezora_supply::blockchain::{
-    block::Block,
-    mining::MiningPoolCoordinator,
-};
+use nezora_supply::blockchain::{block::Block, mining::MiningPoolCoordinator};
 
 fn test_template() -> Block {
     let mut template = Block {
@@ -48,10 +45,7 @@ fn accepted_share_and_nonce_assignment_survive_pool_restart() {
         MiningPoolCoordinator::load_from_file(&state_path).expect("restore pool state");
 
     assert_eq!(restored.accepted_share_count(), 1);
-    assert_eq!(
-        restored.worker_accepted_share_count(&worker_id),
-        Some(1)
-    );
+    assert_eq!(restored.worker_accepted_share_count(&worker_id), Some(1));
     assert_eq!(
         restored.worker_assignment(&worker_id).unwrap().nonce_start,
         7
