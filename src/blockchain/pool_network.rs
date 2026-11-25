@@ -109,11 +109,11 @@ impl PoolTcpServer {
     }
 
     pub fn serve_one(&self) -> Result<()> {
-        self.serve_connection(None, 0, None)
+        self.serve_connection(None, 0, None).map(|_| ())
     }
 
     pub fn serve_one_with_pool(&self, pool: &mut MiningPoolCoordinator, now: u64) -> Result<()> {
-        self.serve_connection(Some(pool), now, None)
+        self.serve_connection(Some(pool), now, None).map(|_| ())
     }
 
     /// Serves one client and persists durable pool changes before replying.
@@ -125,6 +125,18 @@ impl PoolTcpServer {
         state_path: &Path,
     ) -> Result<()> {
         self.serve_connection(Some(pool), now, Some(state_path))
+            .map(|_| ())
+    }
+
+    /// Serves one client and returns a network-difficulty block candidate, if any.
+    /// The caller must validate it against the canonical chain before accepting it.
+    pub fn serve_one_with_pool_state_and_candidate(
+        &self,
+        pool: &mut MiningPoolCoordinator,
+        now: u64,
+        state_path: &Path,
+    ) -> Result<Option<super::block::Block>> {
+        self.serve_connection(Some(pool), now, Some(state_path))
     }
 
     fn serve_connection(
@@ -132,7 +144,7 @@ impl PoolTcpServer {
         mut pool: Option<&mut MiningPoolCoordinator>,
         now: u64,
         state_path: Option<&Path>,
-    ) -> Result<()> {
+    ) -> Result<Option<super::block::Block>> {
         let (mut stream, peer) = self
             .listener
             .accept()
@@ -147,7 +159,16 @@ impl PoolTcpServer {
         stream
             .set_nodelay(true)
             .context("could not enable TCP_NODELAY for pool client")?;
-        handle_connection(&mut stream, pool.as_deref_mut(), now, state_path)
+
+        let mut block_candidate = None;
+        handle_connection(
+            &mut stream,
+            pool.as_deref_mut(),
+            now,
+            state_path,
+            &mut block_candidate,
+        )?;
+        Ok(block_candidate)
     }
 }
 
@@ -190,6 +211,7 @@ fn handle_connection(
     pool: Option<&mut MiningPoolCoordinator>,
     now: u64,
     state_path: Option<&Path>,
+    block_candidate: &mut Option<super::block::Block>,
 ) -> Result<()> {
     let frame = match read_frame(stream) {
         Ok(frame) => frame,
@@ -341,14 +363,19 @@ fn handle_connection(
                 pool.submit_share(worker_id, job_id, nonce, now)
             };
             match submission {
-                Ok(outcome) => write_response(
-                    stream,
-                    &PoolTcpResponse::ShareAccepted {
-                        accepted_share_count: outcome.accepted_share_count,
-                        worker_accepted_share_count: outcome.worker_accepted_share_count,
-                        block_candidate_found: outcome.block_candidate.is_some(),
-                    },
-                ),
+                Ok(outcome) => {
+                    let candidate = outcome.block_candidate;
+                    write_response(
+                        stream,
+                        &PoolTcpResponse::ShareAccepted {
+                            accepted_share_count: outcome.accepted_share_count,
+                            worker_accepted_share_count: outcome.worker_accepted_share_count,
+                            block_candidate_found: candidate.is_some(),
+                        },
+                    )?;
+                    *block_candidate = candidate;
+                    Ok(())
+                }
                 Err(error) => send_error(stream, error.to_string()),
             }
         }
