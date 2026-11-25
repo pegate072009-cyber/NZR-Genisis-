@@ -149,16 +149,24 @@ fn handle_connection(stream: &mut TcpStream, pool: Option<&mut MiningPoolCoordin
                 expires_at: job.expires_at, nonce_start: assignment.nonce_start, nonce_stride: assignment.nonce_stride,
             })
         }
-        PoolTcpRequest::SubmitShare { token, job_id, nonce } => {
+        PoolTcpRequest::SubmitShare {
+            token,
+            job_id,
+            nonce,
+        } => {
             let worker_id = match pool.authenticated_worker(&token, now) {
-                Ok(id) => id, Err(error) => return send_error(stream, error.to_string()),
+                Ok(id) => id,
+                Err(error) => return send_error(stream, error.to_string()),
             };
             match pool.submit_share(worker_id, job_id, nonce, now) {
-                Ok(outcome) => write_response(stream, &PoolTcpResponse::ShareAccepted {
-                    accepted_share_count: outcome.accepted_share_count,
-                    worker_accepted_share_count: outcome.worker_accepted_share_count,
-                    block_candidate_found: outcome.block_candidate.is_some(),
-                }),
+                Ok(outcome) => write_response(
+                    stream,
+                    &PoolTcpResponse::ShareAccepted {
+                        accepted_share_count: outcome.accepted_share_count,
+                        worker_accepted_share_count: outcome.worker_accepted_share_count,
+                        block_candidate_found: outcome.block_candidate.is_some(),
+                    },
+                ),
                 Err(error) => send_error(stream, error.to_string()),
             }
         }
@@ -166,15 +174,21 @@ fn handle_connection(stream: &mut TcpStream, pool: Option<&mut MiningPoolCoordin
 }
 fn challenge_response(challenge: &PoolAuthChallenge) -> PoolTcpResponse {
     PoolTcpResponse::Challenge {
-        challenge_id: challenge.challenge_id, worker_id: challenge.worker_id,
-        nonce: challenge.nonce, expires_at: challenge.expires_at,
+        challenge_id: challenge.challenge_id,
+        worker_id: challenge.worker_id,
+        nonce: challenge.nonce,
+        expires_at: challenge.expires_at,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{io::{BufRead, BufReader}, net::TcpStream, thread};
+    use std::{
+        io::{BufRead, BufReader},
+        net::TcpStream,
+        thread,
+    };
 
     fn send_request(address: SocketAddr, request: &PoolTcpRequest) -> PoolTcpResponse {
         let mut stream = TcpStream::connect(address).unwrap();
