@@ -1,8 +1,5 @@
 use ed25519_dalek::{Signer, SigningKey};
-use nezora_supply::blockchain::{
-    block::Block,
-    mining::MiningPoolCoordinator,
-};
+use nezora_supply::blockchain::{block::Block, mining::MiningPoolCoordinator};
 
 fn test_template(timestamp: u64) -> Block {
     let mut template = Block {
@@ -53,12 +50,7 @@ fn authentication_rejects_an_invalid_signature() {
         .issue_auth_challenge(worker_id, 100, 30)
         .expect("issue challenge");
 
-    let result = pool.complete_authentication(
-        challenge.challenge_id,
-        &[0u8; 64],
-        101,
-        120,
-    );
+    let result = pool.complete_authentication(challenge.challenge_id, &[0u8; 64], 101, 120);
     assert!(result.is_err(), "invalid signature must not authenticate");
 }
 
@@ -97,5 +89,8 @@ fn replaced_pool_job_rejects_old_job_id() {
         .expect("register worker for replacement job");
 
     let result = pool.submit_share(worker_id, old_job_id, 5, 100);
-    assert!(result.is_err(), "shares for a replaced job must be rejected");
+    assert!(
+        result.is_err(),
+        "shares for a replaced job must be rejected"
+    );
 }
