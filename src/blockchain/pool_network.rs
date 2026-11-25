@@ -274,12 +274,8 @@ fn handle_connection(
             };
             let registration = if let Some(path) = state_path {
                 let mut updated = pool.clone();
-                match updated.register_authenticated_worker(
-                    &token,
-                    now,
-                    nonce_start,
-                    nonce_stride,
-                ) {
+                match updated.register_authenticated_worker(&token, now, nonce_start, nonce_stride)
+                {
                     Ok(assignment) => match updated.save_to_file(path) {
                         Ok(()) => {
                             *pool = updated;
@@ -435,7 +431,7 @@ mod tests {
         stream
             .write_all(&vec![b'a'; MAX_POOL_TCP_FRAME_BYTES + 1])
             .unwrap();
-        stream.write_all(b"\\n").unwrap();
+        stream.write_all(b"\n").unwrap();
         assert!(worker.join().unwrap().to_string().contains("size limit"));
     }
 
