@@ -45,8 +45,7 @@ fn load_or_create_node_id(path: &Path) -> Result<[u8; 32]> {
         Ok(mut file) => {
             file.set_permissions(fs::Permissions::from_mode(0o600))
                 .context("setting node ID file permissions")?;
-            io::Write::write_all(&mut file, &node_id)
-                .context("writing node ID")?;
+            io::Write::write_all(&mut file, &node_id).context("writing node ID")?;
             file.sync_all().context("syncing node ID")?;
             Ok(node_id)
         }
