@@ -1,10 +1,133 @@
-use anyhow::Result;
-use std::io::{self, Read, Write};
+use anyhow::{ensure, Context, Result};
+use std::{
+    io::{self, Read, Write},
+    path::Path,
+};
 
 use super::{
     chain::Chain,
+    consensus::ConsensusParams,
     peer_network::{read_message, write_message, PeerMessage, MAX_BLOCKS_PER_BATCH},
+    persistence::save_chain,
 };
+
+/// Maximum number of blocks accepted from one peer during a single sync.
+pub const MAX_SYNC_BLOCKS_PER_SESSION: u64 = 10_000;
+
+/// Downloads and validates the missing suffix of a peer's chain.
+///
+/// Existing local history is never replaced. Every received block is checked
+/// by `Chain::accept_block`; the candidate is persisted before it is published
+/// as the caller's active chain.
+pub fn sync_chain_from_peer<S: Read + Write>(
+    stream: &mut S,
+    chain: &mut Chain,
+    params: &ConsensusParams,
+    chain_path: &Path,
+    current_time: u64,
+) -> Result<u64> {
+    chain.verify_integrity(params)?;
+
+    write_message(stream, &PeerMessage::GetTip {})?;
+    let (remote_height, remote_tip_hash) = match read_message(stream)? {
+        PeerMessage::Tip { height, tip_hash } => (height, tip_hash),
+        PeerMessage::Reject { code, reason } => {
+            anyhow::bail!("peer rejected tip request ({code}): {reason}")
+        }
+        other => anyhow::bail!("unexpected response to GetTip: {other:?}"),
+    };
+
+    ensure!(
+        remote_height <= params.max_supply,
+        "peer chain height exceeds Nezora maximum supply"
+    );
+
+    if remote_height < chain.height() {
+        anyhow::bail!(
+            "peer chain is behind local chain (remote {}, local {})",
+            remote_height,
+            chain.height()
+        );
+    }
+
+    if remote_height == chain.height() {
+        ensure!(
+            remote_tip_hash == chain.tip_hash(),
+            "peer has a different chain at the same height"
+        );
+        return Ok(0);
+    }
+
+    let missing = remote_height
+        .checked_sub(chain.height())
+        .context("remote chain height underflow")?;
+    ensure!(
+        missing <= MAX_SYNC_BLOCKS_PER_SESSION,
+        "peer sync exceeds per-session block limit"
+    );
+
+    let mut candidate = chain.clone();
+    let mut next_height = candidate
+        .height()
+        .checked_add(1)
+        .context("local chain height overflow")?;
+    let mut accepted = 0u64;
+
+    while candidate.height() < remote_height {
+        let remaining = remote_height - candidate.height();
+        let count = remaining.min(u64::from(MAX_BLOCKS_PER_BATCH)) as u16;
+
+        write_message(
+            stream,
+            &PeerMessage::GetBlocks {
+                start_height: next_height,
+                count,
+            },
+        )?;
+
+        let blocks = match read_message(stream)? {
+            PeerMessage::Blocks { blocks } => blocks,
+            PeerMessage::Reject { code, reason } => {
+                anyhow::bail!("peer rejected block request ({code}): {reason}")
+            }
+            other => anyhow::bail!("unexpected response to GetBlocks: {other:?}"),
+        };
+
+        ensure!(
+            blocks.len() == usize::from(count),
+            "peer returned an incomplete block batch"
+        );
+
+        for block in blocks {
+            ensure!(
+                block.height == next_height,
+                "peer returned block at unexpected height"
+            );
+            candidate
+                .accept_block(block, params, current_time)
+                .context("validating downloaded block")?;
+            accepted += 1;
+            next_height = next_height
+                .checked_add(1)
+                .context("block height overflow")?;
+        }
+    }
+
+    ensure!(
+        candidate.height() == remote_height,
+        "downloaded chain height does not match peer tip"
+    );
+    ensure!(
+        candidate.tip_hash() == remote_tip_hash,
+        "downloaded chain tip hash does not match peer advertisement"
+    );
+
+    save_chain(chain_path, &candidate, params)
+        .context("persisting validated synchronized chain")?;
+    *chain = candidate;
+
+    Ok(accepted)
+}
 
 /// Handles read-only peer requests against the local chain.
 ///
