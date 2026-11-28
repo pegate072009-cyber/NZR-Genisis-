@@ -1,15 +1,16 @@
 use anyhow::Result;
+use std::io::{Read, Write};
 
 use super::{
     chain::Chain,
-    peer_network::{PeerMessage, MAX_BLOCKS_PER_BATCH},
+    peer_network::{read_message, write_message, PeerMessage, MAX_BLOCKS_PER_BATCH},
 };
 
 /// Handles read-only peer requests against the local chain.
 ///
-/// This first synchronization phase serves chain metadata and existing blocks.
-/// It deliberately does not accept remote blocks; block validation and
-/// persistence must be wired into a separate, consensus-aware sync loop.
+/// This phase serves chain metadata and existing blocks. It does not accept
+/// remote blocks; applying remote blocks requires a separate validated sync
+/// flow using Chain::accept_block and ConsensusParams.
 pub fn handle_peer_request(chain: &Chain, message: PeerMessage) -> Result<Option<PeerMessage>> {
     let response = match message {
         PeerMessage::Ping { nonce } => Some(PeerMessage::Pong { nonce }),
@@ -50,12 +51,23 @@ pub fn handle_peer_request(chain: &Chain, message: PeerMessage) -> Result<Option
             }
         }
 
-        // Messages that are not requests handled by this function are left
-        // to the caller's session/state machine.
         _ => None,
     };
 
     Ok(response)
+}
+
+/// Reads peer requests from an established TCP stream and sends responses.
+///
+/// The caller owns the stream and decides when to stop the session. A read or
+/// write error (including disconnect/timeout) is returned to the caller.
+pub fn serve_peer_session<S: Read + Write>(stream: &mut S, chain: &Chain) -> Result<()> {
+    loop {
+        let message = read_message(stream)?;
+        if let Some(response) = handle_peer_request(chain, message)? {
+            write_message(stream, &response)?;
+        }
+    }
 }
 
 #[cfg(test)]
