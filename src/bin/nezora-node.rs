@@ -130,14 +130,9 @@ fn main() -> Result<()> {
             .context("system clock is before Unix epoch")?
             .as_secs();
 
-        let accepted = sync_chain_from_peer(
-            &mut stream,
-            &mut chain,
-            &params,
-            &args.chain,
-            current_time,
-        )
-        .context("synchronizing chain from peer")?;
+        let accepted =
+            sync_chain_from_peer(&mut stream, &mut chain, &params, &args.chain, current_time)
+                .context("synchronizing chain from peer")?;
 
         println!("Validated and synchronized {accepted} block(s).");
         println!("Updated local chain height: {}", chain.height());
