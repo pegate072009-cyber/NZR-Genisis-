@@ -19,7 +19,10 @@ pub fn handle_peer_request(chain: &Chain, message: PeerMessage) -> Result<Option
             tip_hash: chain.tip_hash(),
         }),
 
-        PeerMessage::GetBlocks { start_height, count } => {
+        PeerMessage::GetBlocks {
+            start_height,
+            count,
+        } => {
             // Nezora block heights are one-based: the first block is height 1.
             let start_index = usize::try_from(start_height.saturating_sub(1))?;
             let count = usize::from(count.min(MAX_BLOCKS_PER_BATCH));
@@ -35,19 +38,17 @@ pub fn handle_peer_request(chain: &Chain, message: PeerMessage) -> Result<Option
             Some(PeerMessage::Blocks { blocks })
         }
 
-        PeerMessage::GetBlock { block_hash } => match chain
-            .blocks
-            .iter()
-            .find(|block| block.hash() == block_hash)
-        {
-            Some(block) => Some(PeerMessage::Block {
-                block: block.clone(),
-            }),
-            None => Some(PeerMessage::Reject {
-                code: 404,
-                reason: "requested block not found".to_owned(),
-            }),
-        },
+        PeerMessage::GetBlock { block_hash } => {
+            match chain.blocks.iter().find(|block| block.hash() == block_hash) {
+                Some(block) => Some(PeerMessage::Block {
+                    block: block.clone(),
+                }),
+                None => Some(PeerMessage::Reject {
+                    code: 404,
+                    reason: "requested block not found".to_owned(),
+                }),
+            }
+        }
 
         // Messages that are not requests handled by this function are left
         // to the caller's session/state machine.
@@ -65,8 +66,7 @@ mod tests {
     fn answers_ping_with_matching_pong() {
         let chain = Chain::default();
 
-        let response =
-            handle_peer_request(&chain, PeerMessage::Ping { nonce: 42 }).unwrap();
+        let response = handle_peer_request(&chain, PeerMessage::Ping { nonce: 42 }).unwrap();
 
         assert_eq!(response, Some(PeerMessage::Pong { nonce: 42 }));
     }
