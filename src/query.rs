@@ -1,4 +1,4 @@
-use anyhow::{ensure, Context, Result};
+use anyhow::{ensure, Result};
 use serde::Serialize;
 use std::path::PathBuf;
 

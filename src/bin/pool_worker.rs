@@ -324,7 +324,7 @@ fn main() -> Result<()> {
             }
         }
 
-        if attempt % args.job_check_interval == 0 && !stop.load(Ordering::SeqCst) {
+        if attempt.is_multiple_of(args.job_check_interval) && !stop.load(Ordering::SeqCst) {
             match request(
                 args.pool,
                 &PoolTcpRequest::RegisterWorker {

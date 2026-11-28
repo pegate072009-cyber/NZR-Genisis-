@@ -62,6 +62,7 @@ pub fn mine_block(
 
 /// Searches disjoint nonce sequences using multiple CPU workers.
 /// `max_nonce_attempts` is the total attempt budget shared by all workers.
+#[allow(clippy::too_many_arguments)]
 pub fn mine_block_parallel(
     chain: &Chain,
     miner_address: [u8; 32],
@@ -151,7 +152,7 @@ pub fn mine_block_parallel(
 fn create_candidate(
     chain: &Chain,
     miner_address: [u8; 32],
-    transactions: &mut Vec<Transaction>,
+    transactions: &mut [Transaction],
     timestamp: u64,
     params: &ConsensusParams,
 ) -> Result<Block> {
@@ -184,7 +185,7 @@ fn create_candidate(
         reward_coin_number,
         reward_coin_id,
         miner_address,
-        transactions: transactions.clone(),
+        transactions: transactions.to_vec(),
         transaction_root: [0u8; 32],
         nonce: 0,
         difficulty_bits,
@@ -960,7 +961,7 @@ impl MiningPoolCoordinator {
             "nonce is outside worker assignment"
         );
         ensure!(
-            (nonce - assignment.nonce_start) % assignment.nonce_stride == 0,
+            (nonce - assignment.nonce_start).is_multiple_of(assignment.nonce_stride),
             "nonce is outside worker assignment"
         );
         ensure!(

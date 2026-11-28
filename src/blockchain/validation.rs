@@ -432,7 +432,7 @@ mod tests {
         let serialized_size = serde_json::to_vec(&block).unwrap().len();
         assert!(serialized_size > MAX_BLOCK_BYTES);
 
-        let mut chain = Chain::default();
+        let chain = Chain::default();
         assert!(validate_block(&block, &chain, &params, NOW).is_err());
         assert!(chain.blocks.is_empty());
     }

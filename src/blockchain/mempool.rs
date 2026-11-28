@@ -317,8 +317,10 @@ mod tests {
     fn returns_transactions_in_canonical_id_order() {
         let key_a = SigningKey::from_bytes(&[8u8; 32]);
         let key_b = SigningKey::from_bytes(&[9u8; 32]);
-        let mut chain = Chain::default();
-        chain.state = LedgerState::default();
+        let mut chain = Chain {
+            state: LedgerState::default(),
+            ..Chain::default()
+        };
         chain
             .state
             .issue_sequential_coin(1, [0xC1; 32], key_a.verifying_key().to_bytes())

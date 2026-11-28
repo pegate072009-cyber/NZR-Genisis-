@@ -3,6 +3,9 @@ use clap::Parser;
 use nezora_supply::blockchain::{
     peer_network::{PeerMessage, PEER_NETWORK_NAME, PEER_PROTOCOL_VERSION},
     peer_node::{accept_peer, bind_listener, connect_peer},
+    peer_sync::{serve_peer_session, sync_chain_from_peer},
+    persistence::load_chain,
+    Chain, ConsensusParams,
 };
 use rand::{rngs::OsRng, RngCore};
 use std::{
@@ -11,6 +14,7 @@ use std::{
     net::SocketAddr,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 #[derive(Debug, Parser)]
@@ -25,6 +29,10 @@ struct Args {
     /// Directory for this node's persistent identity
     #[arg(long, default_value = "data")]
     data_dir: PathBuf,
+
+    /// Local blockchain file. If absent, the node starts with an empty chain.
+    #[arg(long, default_value = "data/chain.json")]
+    chain: PathBuf,
 }
 
 fn load_or_create_node_id(path: &Path) -> Result<[u8; 32]> {
@@ -68,19 +76,30 @@ fn main() -> Result<()> {
 
     let node_id = load_or_create_node_id(&args.data_dir.join("node_id"))?;
 
+    let params = ConsensusParams::default();
+    let mut chain = if args.chain.exists() {
+        load_chain(&args.chain, &params)
+            .with_context(|| format!("loading chain {}", args.chain.display()))?
+    } else {
+        Chain::default()
+    };
+
     let local_version = PeerMessage::Version {
         network: PEER_NETWORK_NAME.to_string(),
         protocol_version: PEER_PROTOCOL_VERSION,
         node_id,
-        height: 0,
-        tip_hash: [0u8; 32],
+        height: chain.height(),
+        tip_hash: chain.tip_hash(),
     };
 
     println!("Nezora P2P Test Node");
     println!("Node ID: {}", hex::encode(node_id));
     println!("Data directory: {}", args.data_dir.display());
+    println!("Chain file: {}", args.chain.display());
+    println!("Local chain height: {}", chain.height());
+    println!("Local tip hash: {}", hex::encode(chain.tip_hash()));
 
-    let (_stream, remote) = if let Some(address) = args.listen {
+    let (mut stream, remote) = if let Some(address) = args.listen {
         let listener = bind_listener(address)?;
         println!("Listening on {address}");
         accept_peer(&listener, &local_version)?
@@ -91,17 +110,37 @@ fn main() -> Result<()> {
     };
 
     println!("P2P HANDSHAKE SUCCESSFUL");
-    println!(
-        "Remote node: {}",
-        hex::encode(match remote {
-            PeerMessage::Version { node_id, .. } => node_id,
-            _ => [0u8; 32],
-        })
-    );
+    if let PeerMessage::Version {
+        node_id,
+        height,
+        tip_hash,
+        ..
+    } = remote
+    {
+        println!("Remote node ID: {}", hex::encode(node_id));
+        println!("Remote chain height: {height}");
+        println!("Remote tip hash: {}", hex::encode(tip_hash));
+    }
 
-    println!("Connection is open. Press Enter to close.");
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
+    // Only an outbound --connect node initiates synchronization.
+    // The listener remains a request-serving peer.
+    if args.connect.is_some() {
+        let current_time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .context("system clock is before Unix epoch")?
+            .as_secs();
+
+        let accepted =
+            sync_chain_from_peer(&mut stream, &mut chain, &params, &args.chain, current_time)
+                .context("synchronizing chain from peer")?;
+
+        println!("Validated and synchronized {accepted} block(s).");
+        println!("Updated local chain height: {}", chain.height());
+        println!("Updated local tip hash: {}", hex::encode(chain.tip_hash()));
+    }
+
+    println!("P2P message service is active. Waiting for peer requests...");
+    serve_peer_session(&mut stream, &chain).context("P2P peer session ended")?;
 
     Ok(())
 }

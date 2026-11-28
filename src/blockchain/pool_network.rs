@@ -141,7 +141,7 @@ impl PoolTcpServer {
 
     fn serve_connection(
         &self,
-        mut pool: Option<&mut MiningPoolCoordinator>,
+        pool: Option<&mut MiningPoolCoordinator>,
         _now: u64,
         state_path: Option<&Path>,
     ) -> Result<Option<super::block::Block>> {
@@ -167,13 +167,7 @@ impl PoolTcpServer {
             .context("could not enable TCP_NODELAY for pool client")?;
 
         let mut block_candidate = None;
-        handle_connection(
-            &mut stream,
-            pool.as_deref_mut(),
-            now,
-            state_path,
-            &mut block_candidate,
-        )?;
+        handle_connection(&mut stream, pool, now, state_path, &mut block_candidate)?;
         Ok(block_candidate)
     }
 }

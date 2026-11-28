@@ -2,10 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::{ensure, Result};
 
-use super::{
-    consensus::NEZORA_MAX_SUPPLY,
-    transaction::{Transaction, TxOutput},
-};
+use super::{consensus::NEZORA_MAX_SUPPLY, transaction::Transaction};
 
 #[derive(Debug, Clone, Default)]
 pub struct LedgerState {
@@ -115,6 +112,7 @@ impl LedgerState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blockchain::TxOutput;
     use ed25519_dalek::SigningKey;
 
     fn signed_transfer(
@@ -270,8 +268,10 @@ mod tests {
 
     #[test]
     fn rejects_issued_id_count_mismatch() {
-        let mut state = LedgerState::default();
-        state.issued_coin_count = 1;
+        let state = LedgerState {
+            issued_coin_count: 1,
+            ..LedgerState::default()
+        };
 
         assert!(state.verify_invariants().is_err());
     }

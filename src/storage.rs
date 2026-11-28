@@ -428,7 +428,7 @@ pub fn verify_supply(
         .try_into()
         .map_err(|_| anyhow::anyhow!("inventory seed must be exactly 32 bytes"))?;
 
-    let bitmap_len = usize::try_from((domain + 7) / 8).context("inventory bitmap too large")?;
+    let bitmap_len = usize::try_from(domain.div_ceil(8)).context("inventory bitmap too large")?;
     let mut coin_bitmap = encryption_key_path.map(|_| vec![0u8; bitmap_len]);
     let mut slot_bitmap = encryption_key_path.map(|_| vec![0u8; bitmap_len]);
     let encryption_key = match encryption_key_path {

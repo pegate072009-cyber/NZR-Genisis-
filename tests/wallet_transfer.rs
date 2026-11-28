@@ -77,7 +77,7 @@ fn signed_wallet_transfer_updates_balances_and_nonce_after_block_acceptance() {
 #[test]
 fn tampered_wallet_transaction_is_rejected_before_block_acceptance() {
     let params = ConsensusParams::default();
-    let mut chain = Chain::default();
+    let chain = Chain::default();
     let sender = Wallet::from_seed([0x71; 32]);
     let recipient = Wallet::from_seed([0x72; 32]);
     let recipient_address: [u8; 32] = hex::decode(recipient.public_key_hex())

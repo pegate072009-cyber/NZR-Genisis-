@@ -102,7 +102,9 @@ pub fn expected_difficulty_bits(
     let retarget_interval = usize::try_from(params.retarget_interval)
         .map_err(|_| anyhow::anyhow!("retarget interval does not fit this platform"))?;
 
-    if (next_height - 1) % params.retarget_interval != 0 || chain.blocks.len() < retarget_interval {
+    if !(next_height - 1).is_multiple_of(params.retarget_interval)
+        || chain.blocks.len() < retarget_interval
+    {
         return Ok(previous_bits);
     }
 
@@ -163,8 +165,10 @@ mod tests {
 
     #[test]
     fn rejects_zero_initial_difficulty() {
-        let mut params = ConsensusParams::default();
-        params.initial_difficulty_bits = 0;
+        let params = ConsensusParams {
+            initial_difficulty_bits: 0,
+            ..ConsensusParams::default()
+        };
         assert!(params.validate().is_err());
     }
 
@@ -177,8 +181,10 @@ mod tests {
 
     #[test]
     fn rejects_modified_block_reward() {
-        let mut params = ConsensusParams::default();
-        params.block_reward = 2;
+        let params = ConsensusParams {
+            block_reward: 2,
+            ..ConsensusParams::default()
+        };
         assert!(params.validate().is_err());
     }
 

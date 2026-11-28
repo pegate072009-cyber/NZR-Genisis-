@@ -1,10 +1,12 @@
 use anyhow::{ensure, Context, Result};
 use clap::Parser;
+#[cfg(test)]
+use nezora_supply::blockchain::mining::meets_target;
 use nezora_supply::{
     blockchain::{
         block::Block,
         consensus::expected_difficulty_bits,
-        mining::{meets_target, MiningPoolCoordinator},
+        mining::MiningPoolCoordinator,
         persistence::{load_chain, save_chain},
         pool_network::PoolTcpServer,
         Chain, ConsensusParams,

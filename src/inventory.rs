@@ -16,7 +16,11 @@ fn domain_parameters(supply: u64) -> Result<DomainParameters> {
 
     let required_bits = 64 - (supply - 1).leading_zeros();
     let bits = required_bits.max(2);
-    let domain_bits = if bits % 2 == 0 { bits } else { bits + 1 };
+    let domain_bits = if bits.is_multiple_of(2) {
+        bits
+    } else {
+        bits + 1
+    };
 
     ensure!(
         domain_bits <= MAX_DOMAIN_BITS,

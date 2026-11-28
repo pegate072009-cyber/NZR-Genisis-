@@ -1,6 +1,6 @@
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result};
 use ed25519_dalek::SigningKey;
-use rand::{rngs::OsRng, RngCore};
+use rand::rngs::OsRng;
 use std::{
     fs::{self, OpenOptions},
     io::Write,
