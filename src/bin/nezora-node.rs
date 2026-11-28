@@ -3,7 +3,7 @@ use clap::Parser;
 use nezora_supply::blockchain::{
     peer_network::{PeerMessage, PEER_NETWORK_NAME, PEER_PROTOCOL_VERSION},
     peer_node::{accept_peer, bind_listener, connect_peer},
-    peer_sync::serve_peer_session,
+    peer_sync::{serve_peer_session, sync_chain_from_peer},
     persistence::load_chain,
     Chain, ConsensusParams,
 };
@@ -14,6 +14,7 @@ use std::{
     net::SocketAddr,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 #[derive(Debug, Parser)]
@@ -76,7 +77,7 @@ fn main() -> Result<()> {
     let node_id = load_or_create_node_id(&args.data_dir.join("node_id"))?;
 
     let params = ConsensusParams::default();
-    let chain = if args.chain.exists() {
+    let mut chain = if args.chain.exists() {
         load_chain(&args.chain, &params)
             .with_context(|| format!("loading chain {}", args.chain.display()))?
     } else {
@@ -119,6 +120,28 @@ fn main() -> Result<()> {
         println!("Remote node ID: {}", hex::encode(node_id));
         println!("Remote chain height: {height}");
         println!("Remote tip hash: {}", hex::encode(tip_hash));
+    }
+
+    // Only an outbound --connect node initiates synchronization. The listener
+    // remains a request-serving peer and never accepts unsolicited chain data.
+    if args.connect.is_some() {
+        let current_time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .context("system clock is before Unix epoch")?
+            .as_secs();
+
+        let accepted = sync_chain_from_peer(
+            &mut stream,
+            &mut chain,
+            &params,
+            &args.chain,
+            current_time,
+        )
+        .context("synchronizing chain from peer")?;
+
+        println!("Validated and synchronized {accepted} block(s).");
+        println!("Updated local chain height: {}", chain.height());
+        println!("Updated local tip hash: {}", hex::encode(chain.tip_hash()));
     }
 
     println!("P2P message service is active. Waiting for peer requests...");
