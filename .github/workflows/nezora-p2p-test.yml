@@ -1,0 +1,81 @@
+name: Nezora P2P Test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src/bin/nezora-node.rs'
+      - 'src/blockchain/peer_node.rs'
+      - 'src/blockchain/peer_network.rs'
+      - '.github/workflows/nezora-p2p-test.yml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+
+permissions:
+  contents: read
+
+jobs:
+  two-node-handshake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Nezora node
+        run: cargo build --release --locked --bin nezora-node
+
+      - name: Run two-node localhost handshake
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="target/release/nezora-node"
+          PORT=18444
+          TMP="$RUNNER_TEMP/nezora-p2p-test"
+          mkdir -p "$TMP"
+
+          # Start Node A as listener. Keep stdin open until the test completes.
+          (sleep 15 | "$BIN" \
+            --listen "127.0.0.1:$PORT" \
+            --data-dir "$TMP/node-a" \
+            --chain "$TMP/node-a-chain.json") >"$TMP/node-a.log" 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+
+          # Wait briefly for the listener to bind, then connect Node B.
+          sleep 1
+          printf '\n' | "$BIN" \
+            --connect "127.0.0.1:$PORT" \
+            --data-dir "$TMP/node-b" \
+            --chain "$TMP/node-b-chain.json" | tee "$TMP/node-b.log"
+
+          # Ensure Node A completed its side of the handshake.
+          for attempt in {1..10}; do
+            if grep -q 'P2P HANDSHAKE SUCCESSFUL' "$TMP/node-a.log"; then
+              break
+            fi
+            sleep 1
+          done
+
+          grep -q 'P2P HANDSHAKE SUCCESSFUL' "$TMP/node-a.log"
+          grep -q 'P2P HANDSHAKE SUCCESSFUL' "$TMP/node-b.log"
+          grep -q 'Remote chain height: 0' "$TMP/node-a.log"
+          grep -q 'Remote chain height: 0' "$TMP/node-b.log"
+          test -s "$TMP/node-a/node_id"
+          test -s "$TMP/node-b/node_id"
+          test "$(wc -c < "$TMP/node-a/node_id")" -eq 32
+          test "$(wc -c < "$TMP/node-b/node_id")" -eq 32
+          if cmp -s "$TMP/node-a/node_id" "$TMP/node-b/node_id"; then
+            echo 'ERROR: both nodes have the same identity'
+            exit 1
+          fi
+
+          echo 'PASS: both nodes completed the P2P handshake with distinct persistent identities and exchanged chain height.'
+          echo '--- Node A log ---'
+          cat "$TMP/node-a.log"
+          echo '--- Node B log ---'
+          cat "$TMP/node-b.log"

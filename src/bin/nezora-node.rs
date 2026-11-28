@@ -123,7 +123,7 @@ fn main() -> Result<()> {
     }
 
     // Only an outbound --connect node initiates synchronization.
-    // The listener remains a request-serving peer.
+    // The listener remains a request-serving peer and never accepts unsolicited chain data.
     if args.connect.is_some() {
         let current_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
