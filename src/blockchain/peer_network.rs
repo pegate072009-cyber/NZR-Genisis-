@@ -175,29 +175,50 @@ mod tests {
 
     #[test]
     fn get_blocks_round_trip() {
-        let message = PeerMessage::GetBlocks { start_height: 5, count: 50 };
-        assert_eq!(decode_message(&encode_message(&message).unwrap()).unwrap(), message);
+        let message = PeerMessage::GetBlocks {
+            start_height: 5,
+            count: 50,
+        };
+        assert_eq!(
+            decode_message(&encode_message(&message).unwrap()).unwrap(),
+            message
+        );
     }
 
     #[test]
     fn blocks_batch_round_trip() {
-        let message = PeerMessage::Blocks { blocks: vec![test_block(1), test_block(2)] };
-        assert_eq!(decode_message(&encode_message(&message).unwrap()).unwrap(), message);
+        let message = PeerMessage::Blocks {
+            blocks: vec![test_block(1), test_block(2)],
+        };
+        assert_eq!(
+            decode_message(&encode_message(&message).unwrap()).unwrap(),
+            message
+        );
     }
 
     #[test]
     fn rejects_zero_block_request_count() {
-        assert!(encode_message(&PeerMessage::GetBlocks { start_height: 1, count: 0 }).is_err());
+        assert!(encode_message(&PeerMessage::GetBlocks {
+            start_height: 1,
+            count: 0
+        })
+        .is_err());
     }
 
     #[test]
     fn rejects_oversized_block_request_count() {
-        assert!(encode_message(&PeerMessage::GetBlocks { start_height: 1, count: MAX_BLOCKS_PER_BATCH + 1 }).is_err());
+        assert!(encode_message(&PeerMessage::GetBlocks {
+            start_height: 1,
+            count: MAX_BLOCKS_PER_BATCH + 1
+        })
+        .is_err());
     }
 
     #[test]
     fn rejects_oversized_block_response_batch() {
-        let blocks = (1..=u64::from(MAX_BLOCKS_PER_BATCH) + 1).map(test_block).collect();
+        let blocks = (1..=u64::from(MAX_BLOCKS_PER_BATCH) + 1)
+            .map(test_block)
+            .collect();
         assert!(encode_message(&PeerMessage::Blocks { blocks }).is_err());
     }
 
