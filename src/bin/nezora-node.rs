@@ -122,8 +122,7 @@ fn main() -> Result<()> {
     }
 
     println!("P2P message service is active. Waiting for peer requests...");
-    serve_peer_session(&mut stream, &chain)
-        .context("P2P peer session ended")?;
+    serve_peer_session(&mut stream, &chain).context("P2P peer session ended")?;
 
     Ok(())
 }
