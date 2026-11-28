@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 
 use super::{
     chain::Chain,
@@ -57,13 +57,32 @@ pub fn handle_peer_request(chain: &Chain, message: PeerMessage) -> Result<Option
     Ok(response)
 }
 
-/// Reads peer requests from an established TCP stream and sends responses.
+fn is_idle_timeout(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<io::Error>()
+            .is_some_and(|io_error| {
+                matches!(
+                    io_error.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                )
+            })
+    })
+}
+
+/// Serves requests on an established TCP stream.
 ///
-/// The caller owns the stream and decides when to stop the session. A read or
-/// write error (including disconnect/timeout) is returned to the caller.
+/// The peer socket has a finite read timeout. If no complete request arrives
+/// before that timeout, the idle session ends normally instead of failing the
+/// node's P2P test. Other read/write errors are still returned.
 pub fn serve_peer_session<S: Read + Write>(stream: &mut S, chain: &Chain) -> Result<()> {
     loop {
-        let message = read_message(stream)?;
+        let message = match read_message(stream) {
+            Ok(message) => message,
+            Err(error) if is_idle_timeout(&error) => return Ok(()),
+            Err(error) => return Err(error),
+        };
+
         if let Some(response) = handle_peer_request(chain, message)? {
             write_message(stream, &response)?;
         }
@@ -73,6 +92,27 @@ pub fn serve_peer_session<S: Read + Write>(stream: &mut S, chain: &Chain) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct TimedOutStream;
+
+    impl Read for TimedOutStream {
+        fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
+            Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "simulated idle peer timeout",
+            ))
+        }
+    }
+
+    impl Write for TimedOutStream {
+        fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+            Ok(buffer.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
 
     #[test]
     fn answers_ping_with_matching_pong() {
@@ -121,5 +161,13 @@ mod tests {
         let response = handle_peer_request(&chain, PeerMessage::Verack {}).unwrap();
 
         assert_eq!(response, None);
+    }
+
+    #[test]
+    fn idle_socket_timeout_ends_session_without_failing() {
+        let chain = Chain::default();
+        let mut stream = TimedOutStream;
+
+        assert!(serve_peer_session(&mut stream, &chain).is_ok());
     }
 }
