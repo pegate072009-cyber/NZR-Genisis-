@@ -59,14 +59,12 @@ pub fn handle_peer_request(chain: &Chain, message: PeerMessage) -> Result<Option
 
 fn is_idle_timeout(error: &anyhow::Error) -> bool {
     error.chain().any(|cause| {
-        cause
-            .downcast_ref::<io::Error>()
-            .is_some_and(|io_error| {
-                matches!(
-                    io_error.kind(),
-                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
-                )
-            })
+        cause.downcast_ref::<io::Error>().is_some_and(|io_error| {
+            matches!(
+                io_error.kind(),
+                io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+            )
+        })
     })
 }
 
