@@ -106,8 +106,7 @@ mod tests {
     fn ignores_non_request_messages() {
         let chain = Chain::default();
 
-        let response =
-            handle_peer_request(&chain, PeerMessage::Verack {}).unwrap();
+        let response = handle_peer_request(&chain, PeerMessage::Verack {}).unwrap();
 
         assert_eq!(response, None);
     }
