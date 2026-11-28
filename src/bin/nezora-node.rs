@@ -3,6 +3,7 @@ use clap::Parser;
 use nezora_supply::blockchain::{
     peer_network::{PeerMessage, PEER_NETWORK_NAME, PEER_PROTOCOL_VERSION},
     peer_node::{accept_peer, bind_listener, connect_peer},
+    peer_sync::serve_peer_session,
     persistence::load_chain,
     Chain, ConsensusParams,
 };
@@ -97,7 +98,7 @@ fn main() -> Result<()> {
     println!("Local chain height: {}", chain.height());
     println!("Local tip hash: {}", hex::encode(chain.tip_hash()));
 
-    let (_stream, remote) = if let Some(address) = args.listen {
+    let (mut stream, remote) = if let Some(address) = args.listen {
         let listener = bind_listener(address)?;
         println!("Listening on {address}");
         accept_peer(&listener, &local_version)?
@@ -120,9 +121,9 @@ fn main() -> Result<()> {
         println!("Remote tip hash: {}", hex::encode(tip_hash));
     }
 
-    println!("Connection is open. Press Enter to close.");
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
+    println!("P2P message service is active. Waiting for peer requests...");
+    serve_peer_session(&mut stream, &chain)
+        .context("P2P peer session ended")?;
 
     Ok(())
 }
