@@ -56,14 +56,20 @@ pub enum PeerMessage {
 
 fn validate_message(message: &PeerMessage) -> Result<()> {
     match message {
-        PeerMessage::GetBlocks { count, .. } => ensure!(
-            (1..=MAX_BLOCKS_PER_BATCH).contains(count),
-            "requested block count must be between 1 and {MAX_BLOCKS_PER_BATCH}"
-        ),
-        PeerMessage::Blocks { blocks } => ensure!(
-            blocks.len() <= usize::from(MAX_BLOCKS_PER_BATCH),
-            "block response exceeds maximum batch count"
-        ),
+        PeerMessage::GetBlocks { count, .. } => {
+            ensure!(
+                (1..=MAX_BLOCKS_PER_BATCH).contains(count),
+                "requested block count must be between 1 and {MAX_BLOCKS_PER_BATCH}"
+            );
+            Ok(())
+        }
+        PeerMessage::Blocks { blocks } => {
+            ensure!(
+                blocks.len() <= usize::from(MAX_BLOCKS_PER_BATCH),
+                "block response exceeds maximum batch count"
+            );
+            Ok(())
+        }
         _ => Ok(()),
     }
 }
